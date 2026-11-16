@@ -1,0 +1,372 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "priority": {
+      "$email": {
+        ".read": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && $email === auth.token.email.toLowerCase().replace('.', '%2E')",
+        ".write": false
+      }
+    },
+    "rooms": {
+      "$slot": {
+        ".write": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid && !newData.exists()",
+        "meta": {
+          ".read": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && ((root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid) || ($slot === '0' && root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true))",
+          ".write": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && newData.exists() && ((data.child('host').val() === auth.uid && newData.child('host').val() === auth.uid && newData.child('code').val() === data.child('code').val()) || ((!data.exists() || data.child('open').val() === false || data.child('leaseEnd').val() <= now) && newData.child('host').val() === auth.uid && !newData.hasChild('guest')) || (data.child('open').val() === true && data.child('leaseEnd').val() > now && (!data.hasChild('guest') || data.child('guest').val() === auth.uid) && data.child('host').val() !== auth.uid && newData.child('guest').val() === auth.uid && newData.child('joinCode').val() === data.child('code').val() && newData.child('host').val() === data.child('host').val() && newData.child('code').val() === data.child('code').val() && newData.child('createdAt').val() === data.child('createdAt').val() && newData.child('leaseEnd').val() === data.child('leaseEnd').val() && newData.child('open').val() === data.child('open').val()))",
+          ".validate": "newData.hasChildren(['host','code','open','createdAt','leaseEnd']) && true",
+          "host": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128"
+          },
+          "code": {
+            ".validate": "newData.isString() && newData.val().length === 8 && newData.val().beginsWith($slot)"
+          },
+          "open": {
+            ".validate": "newData.isBoolean()"
+          },
+          "createdAt": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000000000000"
+          },
+          "leaseEnd": {
+            ".validate": "newData.isNumber() && newData.val() <= now + 86460000"
+          },
+          "guest": {
+            ".write": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && root.child('rooms').child($slot).child('meta').child('open').val() === true && root.child('rooms').child($slot).child('meta').child('leaseEnd').val() > now && data.val() === auth.uid && newData.val() === auth.uid",
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128"
+          },
+          "joinCode": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 8"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "settings": {
+          ".read": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid)",
+          ".write": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid) && root.child('rooms').child($slot).child('meta').child('open').val() === true && root.child('rooms').child($slot).child('meta').child('leaseEnd').val() > now && root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid",
+          ".validate": "newData.hasChildren(['game','rounds','timer','wordCount','guessesPerHint','category','topic','left','right','version'])",
+          "game": {
+            ".validate": "newData.val() === 'wheel' || newData.val() === 'chain' || newData.val() === 'clues'"
+          },
+          "rounds": {
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 20"
+          },
+          "timer": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 300"
+          },
+          "wordCount": {
+            ".validate": "newData.isNumber() && newData.val() >= 3 && newData.val() <= 12"
+          },
+          "guessesPerHint": {
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 5"
+          },
+          "category": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 30"
+          },
+          "topic": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 20"
+          },
+          "left": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
+          },
+          "right": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
+          },
+          "version": {
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 1000000000000000"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "players": {
+          ".read": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid)",
+          ".write": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid) && root.child('rooms').child($slot).child('meta').child('open').val() === true && root.child('rooms').child($slot).child('meta').child('leaseEnd').val() > now && root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid",
+          ".validate": "true",
+          "$uid": {
+            ".write": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid) && root.child('rooms').child($slot).child('meta').child('open').val() === true && root.child('rooms').child($slot).child('meta').child('leaseEnd').val() > now && auth.uid === $uid",
+            ".validate": "($uid === root.child('rooms').child($slot).child('meta').child('host').val() || $uid === root.child('rooms').child($slot).child('meta').child('guest').val()) && newData.hasChild('name')",
+            "name": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 24"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "ready": {
+          ".read": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid)",
+          ".write": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid) && root.child('rooms').child($slot).child('meta').child('open').val() === true && root.child('rooms').child($slot).child('meta').child('leaseEnd').val() > now && root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid",
+          ".validate": "true",
+          "$uid": {
+            ".write": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid) && root.child('rooms').child($slot).child('meta').child('open').val() === true && root.child('rooms').child($slot).child('meta').child('leaseEnd').val() > now && auth.uid === $uid",
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 1000000000000000 && ($uid === root.child('rooms').child($slot).child('meta').child('host').val() || $uid === root.child('rooms').child($slot).child('meta').child('guest').val())"
+          }
+        },
+        "presence": {
+          ".read": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid)",
+          ".write": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid) && root.child('rooms').child($slot).child('meta').child('open').val() === true && root.child('rooms').child($slot).child('meta').child('leaseEnd').val() > now && root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid && !newData.exists()",
+          ".validate": "true",
+          "$uid": {
+            ".write": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid) && auth.uid === $uid",
+            ".validate": "($uid === root.child('rooms').child($slot).child('meta').child('host').val() || $uid === root.child('rooms').child($slot).child('meta').child('guest').val()) && true",
+            "$connection": {
+              ".validate": "newData.val() === true && ($connection === '0' || $connection === '1' || $connection === '2')"
+            }
+          }
+        },
+        "state": {
+          ".read": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid)",
+          ".write": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid) && root.child('rooms').child($slot).child('meta').child('open').val() === true && root.child('rooms').child($slot).child('meta').child('leaseEnd').val() > now && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || (data.exists() && newData.child('id').val() === data.child('id').val() && newData.child('game').val() === data.child('game').val() && newData.child('round').val() === data.child('round').val()))",
+          ".validate": "newData.hasChildren(['id','game','phase','config','round','players','scores','revision']) && true",
+          "id": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 50"
+          },
+          "game": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 10"
+          },
+          "phase": {
+            ".validate": "newData.val() === 'prepare' || newData.val() === 'clue' || newData.val() === 'guess' || newData.val() === 'pending' || newData.val() === 'reveal' || newData.val() === 'setup' || newData.val() === 'hint' || newData.val() === 'finished'"
+          },
+          "config": {
+            ".validate": "newData.hasChildren(['game','rounds','timer','wordCount','guessesPerHint','category','topic','left','right','version'])",
+            "game": {
+              ".validate": "newData.val() === 'wheel' || newData.val() === 'chain' || newData.val() === 'clues'"
+            },
+            "rounds": {
+              ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 20"
+            },
+            "timer": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 300"
+            },
+            "wordCount": {
+              ".validate": "newData.isNumber() && newData.val() >= 3 && newData.val() <= 12"
+            },
+            "guessesPerHint": {
+              ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 5"
+            },
+            "category": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 30"
+            },
+            "topic": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 20"
+            },
+            "left": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
+            },
+            "right": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
+            },
+            "version": {
+              ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 1000000000000000"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          "round": {
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 20"
+          },
+          "revision": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000000"
+          },
+          "giver": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128"
+          },
+          "turn": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128"
+          },
+          "winner": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128"
+          },
+          "deadline": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000000000000"
+          },
+          "pausedAt": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000000000000"
+          },
+          "topicSeed": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+          },
+          "left": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
+          },
+          "right": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
+          },
+          "clue": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
+          },
+          "hintIndex": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3"
+          },
+          "used": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 5"
+          },
+          "players": {
+            "0": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128"
+            },
+            "1": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128"
+            },
+            ".validate": "true && newData.child('0').val() === root.child('rooms').child($slot).child('meta').child('host').val() && newData.child('1').val() === root.child('rooms').child($slot).child('meta').child('guest').val()",
+            "$other": {
+              ".validate": false
+            }
+          },
+          "scores": {
+            ".validate": "true",
+            "$uid": {
+              ".validate": "($uid === root.child('rooms').child($slot).child('meta').child('host').val() || $uid === root.child('rooms').child($slot).child('meta').child('guest').val()) && newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000"
+            }
+          },
+          "boards": {
+            ".validate": "true",
+            "$uid": {
+              ".validate": "($uid === root.child('rooms').child($slot).child('meta').child('host').val() || $uid === root.child('rooms').child($slot).child('meta').child('guest').val()) && newData.hasChild('masks')",
+              "masks": {
+                ".validate": "newData.hasChildren(['0','1','2'])",
+                "$index": {
+                  ".validate": "$index.matches(/^([0-9]|10|11)$/) && (newData.isString() && newData.val().length > 0 && newData.val().length <= 40)"
+                }
+              },
+              "solved": {
+                ".validate": "true",
+                "$index": {
+                  ".validate": "$index.matches(/^([0-9]|10|11)$/) && (newData.isBoolean())"
+                }
+              },
+              "letters": {
+                ".validate": "true",
+                "$index": {
+                  ".validate": "$index.matches(/^([0-9]|10|11)$/) && (newData.isNumber() && newData.val() >= 1 && newData.val() <= 40)"
+                }
+              },
+              "$other": {
+                ".validate": false
+              }
+            }
+          },
+          "hints": {
+            ".validate": "true",
+            "$i": {
+              ".validate": "$i.matches(/^[0-2]$/) && (newData.isString() && newData.val().length > 0 && newData.val().length <= 40)"
+            }
+          },
+          "attempts": {
+            ".validate": "true",
+            "$i": {
+              ".validate": "$i.matches(/^([0-9]|1[0-4])$/) && (newData.hasChildren(['guess','correct','hint']))",
+              "guess": {
+                ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 80"
+              },
+              "correct": {
+                ".validate": "newData.isBoolean()"
+              },
+              "hint": {
+                ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 3"
+              },
+              "$other": {
+                ".validate": false
+              }
+            }
+          },
+          "pending": {
+            ".validate": "newData.hasChildren(['actor','kind'])",
+            "actor": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128"
+            },
+            "kind": {
+              ".validate": "newData.val() === 'guess' || newData.val() === 'hint' || newData.val() === 'timeout'"
+            },
+            "value": {
+              ".validate": "(newData.isString() && newData.val().length <= 80) || (newData.isNumber() && newData.val() >= 0 && newData.val() <= 100)"
+            },
+            "index": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 11"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          "result": {
+            "target": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+            },
+            "guess": {
+              ".validate": "newData.isNumber() && newData.val() >= -1 && newData.val() <= 100"
+            },
+            "points": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4"
+            },
+            "timedOut": {
+              ".validate": "newData.isBoolean()"
+            },
+            "word": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 40"
+            },
+            "correct": {
+              ".validate": "newData.isBoolean()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          "feedback": {
+            "actor": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128"
+            },
+            "text": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200"
+            },
+            "kind": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 20"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "secrets": {
+      "$slot": {
+        ".write": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid && !newData.exists()",
+        ".validate": "true",
+        "$uid": {
+          ".read": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid) && auth.uid === $uid",
+          ".write": "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && ($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4') && ($slot !== '0' || root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true) && (root.child('rooms').child($slot).child('meta').child('host').val() === auth.uid || root.child('rooms').child($slot).child('meta').child('guest').val() === auth.uid) && root.child('rooms').child($slot).child('meta').child('open').val() === true && root.child('rooms').child($slot).child('meta').child('leaseEnd').val() > now && auth.uid === $uid",
+          ".validate": "newData.hasChildren(['gameId','round']) && true",
+          "gameId": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 50"
+          },
+          "round": {
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 20"
+          },
+          "target": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+          },
+          "word": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 40"
+          },
+          "words": {
+            ".validate": "newData.hasChildren(['0','1','2'])",
+            "$i": {
+              ".validate": "$i.matches(/^([0-9]|10|11)$/) && (newData.isString() && newData.val().length > 0 && newData.val().length <= 40)"
+            }
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    }
+  }
+}

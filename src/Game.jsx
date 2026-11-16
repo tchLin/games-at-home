@@ -1,0 +1,74 @@
+import { useEffect, useState } from 'react';
+import { ArrowRight, Check, Clock3, EyeOff, Lightbulb, RefreshCw, Send, Sparkles, Trophy, Heart } from 'lucide-react';
+import { db, ref, set } from './firebase.js';
+import { GAMES, suggestions } from './content.js';
+import { other, deadline, nextRound, maskWord, normalize } from './engine.js';
+import { Dial } from './art.jsx';
+import { Button, Field, Tag, Notice } from './App.jsx';
+export default function Game(props) {
+  const {room,uid,secret,isHost,bothOnline,connected,now,mutate,act,busy,base}=props;
+  const s=room.state;
+  const mine=secret?.gameId===s.id&&secret.round===s.round?secret:null;
+  const disabled=busy||!bothOnline||!connected||Boolean(s.pausedAt);
+  const seconds=Math.max(0,Math.ceil(((s.deadline||0)-(s.pausedAt||now))/1000));
+  const send = (kind,value,index=0) => act(()=>mutate(v=>v.phase==='guess'?{...v,phase:'pending',deadline:0,pending:{actor:uid,kind,value,index}}:null,s));
+  return <section className={`play-area ${GAMES[s.game].color}`}><div className="game-heading"><div><span className="eyebrow">{s.game==='chain'?'YOUR WORD RACE':`ROUND ${s.round} OF ${s.config.rounds}`}</span><h1>{GAMES[s.game].name}</h1></div><Tag><Clock3 size={14}/>{s.phase==='guess'&&s.config.timer?`${seconds}s ${s.pausedAt?'· paused':''}`:s.config.timer?`${s.config.timer}s per guessing turn`:'No rush'}</Tag></div>
+    {(!bothOnline||s.pausedAt)&&s.phase!=='finished'&&<Notice>Your game is saved. Waiting for both players to be here before continuing.</Notice>}
+    {s.phase==='finished'?<div className="game-stage end-stage"><div className="trophy"><Trophy size={34}/></div><Tag>THAT WAS A GOOD ONE</Tag><h2>{s.game==='wheel'?'On the same wavelength.':s.game==='chain'?`${props.name(s.winner)} found every word!`:s.scores[s.players[0]]===s.scores[s.players[1]]?'A perfectly matched pair.':`${props.name(s.players.reduce((a,b)=>s.scores[a]>s.scores[b]?a:b))} takes this one!`}</h2><p>{s.game==='wheel'?`You earned ${s.scores[uid]} points together.`:'The best part? There’s always another round.'}</p><div className="final-scores">{s.players.map(p=><div key={p}><strong>{s.scores[p]}</strong><span>{props.name(p)}</span></div>)}</div>{isHost?<Button onClick={()=>act(()=>set(ref(db,`${base}/state`),null))}>What shall we play next?<ArrowRight size={17}/></Button>:<Notice>Your host can choose the next game.</Notice>}</div>:
+    <div className="game-stage" key={`${s.id}-${s.round}`}>{s.game==='wheel'?<Wheel {...props} s={s} secret={mine} disabled={disabled} send={send}/>:s.game==='chain'?<Chain {...props} s={s} secret={mine} disabled={disabled} send={send}/>:<Clues {...props} s={s} secret={mine} disabled={disabled} send={send}/>}</div>}
+    {s.phase==='reveal'&&<div className="round-footer">{isHost?<Button disabled={busy||!bothOnline} onClick={()=>act(()=>mutate(v=>nextRound(v,now),s))}>{s.round>=s.config.rounds?'See how you did':'One more round'}<ArrowRight size={18}/></Button>:<span>Your host will start the next round.</span>}</div>}
+  </section>;
+}
+function Wheel({s,secret,uid,name,disabled,send,mutate,act,now,secretPath}) {
+  const [clue,setClue]=useState(''),[guess,setGuess]=useState(50);
+  const giver=s.giver===uid, reveal=s.phase==='reveal';
+  const target=reveal?s.result.target:giver?secret?.target:null;
+  const submit=e=>{e.preventDefault();act(()=>mutate(v=>({...v,clue:clue.trim(),phase:'guess',deadline:deadline(v,now)}),s));};
+  const spin=()=>act(async()=>{await set(ref(db,secretPath),{gameId:s.id,round:s.round,target:5+crypto.getRandomValues(new Uint32Array(1))[0]%91});await mutate(v=>({...v,phase:'clue'}),s);});
+  return <><div className="stage-title"><Tag>{reveal?'THE BIG REVEAL':giver?'YOU’RE THE CLUE GIVER':'YOU’RE THE MIND READER'}</Tag><h2>{reveal?s.result.points>=3?'You two get each other.':'A little closer next time.':s.phase==='clue'&&giver?'What belongs right here?':s.clue?`“${s.clue}”`:`${name(s.giver)} is finding the perfect clue.`}</h2><p>{reveal?'The terracotta marker is the target. The dark needle is the guess.':giver?'Only you can see the secret target. Think of a clue that belongs at this spot.':s.clue?'Where does that clue belong? Trust your instinct.':'The target stays hidden. Your clue is on its way.'}</p></div>
+    <div className="wheel-panel"><Dial target={target} guess={reveal&&s.result.guess>=0?s.result.guess:guess} showGuess={reveal?s.result.guess>=0:!giver&&s.phase==='guess'}/><div className="scale-labels"><span>{s.left}</span><span>{s.right}</span></div>{giver&&!reveal&&secret&&<div className="secret-target"><EyeOff size={14}/> Secret target: <strong>{secret.target}/100</strong></div>}{reveal&&<div className="reveal-points"><strong>+{s.result.points}</strong><span>points together {s.result.timedOut?'· time ran out':`· ${Math.abs(s.result.target-s.result.guess)} apart`}</span></div>}</div>
+    {giver&&s.phase==='prepare'&&<div className="action-form"><Button onClick={spin} disabled={disabled}><RefreshCw size={17}/> Spin the wheel</Button></div>}
+    {giver&&s.phase==='clue'&&<form onSubmit={submit} className="action-form"><Field label="Your clue"><input autoFocus value={clue} onChange={e=>setClue(e.target.value)} placeholder="A word, a Pokémon, a little idea…" maxLength={80} required disabled={disabled}/></Field><Button disabled={disabled||!clue.trim()}>Send your clue<Send size={16}/></Button></form>}
+    {!giver&&s.phase==='guess'&&<form className="action-form" onSubmit={e=>{e.preventDefault();send('guess',guess);}}><label className="range-label" htmlFor="wheel-guess">Your instinct <strong>{guess}/100</strong></label><input id="wheel-guess" className="range" type="range" min="0" max="100" value={guess} onChange={e=>setGuess(+e.target.value)} disabled={disabled}/><Button disabled={disabled}>Lock in my guess<Check size={17}/></Button></form>}
+    {giver&&s.phase==='guess'&&<Notice>You sent “{s.clue}”. Let’s see where your person places it.</Notice>}{s.phase==='pending'&&<Notice>Bringing your guesses together…</Notice>}
+  </>;
+}
+function WordIdeas({category,onPick,exclude=[]}) {
+  const [ideas,setIdeas]=useState(()=>suggestions(category,6,exclude));
+  return <div className="word-ideas"><div><span><Lightbulb size={15}/> A little inspiration</span><button className="text-button" type="button" onClick={()=>setIdeas(suggestions(category,6,exclude))}><RefreshCw size={13}/> More ideas</button></div><div className="suggestion-chips">{ideas.map(w=><button type="button" key={w} onClick={()=>onPick(w)}>{w}</button>)}</div></div>;
+}
+function Chain({s,secret,uid,name,disabled,send,mutate,act,secretPath,now}) {
+  const [words,setWords]=useState(Array(s.config.wordCount).fill('')),[guess,setGuess]=useState(''),[selected,setSelected]=useState(0);
+  const opponent=other(s,uid),board=s.boards?.[opponent],myBoard=s.boards?.[uid];
+  useEffect(()=>{if(board?.solved?.[selected])setSelected(board.masks.findIndex((_,i)=>!board.solved?.[i]));},[board]);
+  if(s.phase==='setup') {
+    const save=e=>{e.preventDefault();act(async()=>{
+      const clean=words.map(w=>w.trim());
+      if(clean.some(w=>!normalize(w)))throw Error('Each word needs at least one letter or number.');
+      if(new Set(clean.map(normalize)).size!==clean.length)throw Error('Give each spot a different word.');
+      await set(ref(db,secretPath),{gameId:s.id,round:s.round,words:clean});
+      await mutate(v=>{if(v.phase!=='setup'||v.boards?.[uid])return null;return {...v,boards:{...v.boards,[uid]:{masks:clean.map(w=>maskWord(w))}}};});
+    });};
+    return <><div className="stage-title"><Tag>YOUR SECRET LITTLE LIST</Tag><h2>{myBoard?'Your words are tucked away.':'A word for every little possibility.'}</h2><p>{myBoard?`Waiting for ${name(opponent)} to finish their list.`:`Pick ${s.config.wordCount} unrelated words. Your person will only see the first letter of each.`}</p></div>{myBoard?<div className="saved-word-list">{secret?.words.map((w,i)=><span key={i}><Check size={14}/>{w}</span>)}</div>:<form onSubmit={save} className="word-setup"><div className="word-inputs">{words.map((w,i)=><Field key={i} label={`Word ${i+1}`}><input value={w} onChange={e=>setWords(list=>list.map((x,j)=>i===j?e.target.value:x))} maxLength={40} required pattern="[^\s]+" title="One word without spaces" disabled={disabled} placeholder={i===0?'coffee':'Your secret word'}/></Field>)}</div><WordIdeas category={s.config.category} exclude={words} onPick={word=>setWords(list=>{const index=list.findIndex(w=>!w.trim());return list.map((w,i)=>i===(index<0?list.length-1:index)?word:w);})}/><div className="form-buttons"><Button secondary type="button" disabled={disabled} onClick={()=>setWords(suggestions(s.config.category,s.config.wordCount))}><Sparkles size={16}/> Suggest a whole list</Button><Button disabled={disabled||words.some(w=>!w.trim())}>Tuck these away<EyeOff size={16}/></Button></div></form>}</>;
+  }
+  const myTurn=s.turn===uid&&s.phase==='guess';
+  return <><div className="stage-title"><Tag>{myTurn?'YOUR TURN':'THEIR TURN'}</Tag><h2>{myTurn?'Follow the letters.':'A little thinking time.'}</h2><p>{myTurn?'Choose a word and take a guess. Get it right to keep going.':`${name(s.turn)} is working on your words.`}</p></div>{s.feedback&&<div className={`feedback ${s.feedback.kind}`}><span>{name(s.feedback.actor)}:</span> {s.feedback.text}</div>}
+    <div className="word-boards"><section><h3>{name(opponent)}’s secret words <span>{s.scores[uid]}/{s.config.wordCount}</span></h3><div className="word-rows">{board?.masks.map((word,i)=><button key={i} className={`word-row ${selected===i?'chosen':''} ${board.solved?.[i]?'solved':''}`} onClick={()=>setSelected(i)} disabled={!!board.solved?.[i]||!myTurn||disabled}><span className="word-number">{String(i+1).padStart(2,'0')}</span><span className="letter-mask">{word}</span>{board.solved?.[i]?<Check size={17}/>:<span className="word-length">{[...word].length} letters</span>}</button>)}</div></section><section className="my-list"><h3>Your secret list<EyeOff size={15}/></h3>{secret?.words.map((word,i)=><div key={i} className={myBoard?.solved?.[i]?'crossed':''}><span>{word}</span><small>{myBoard?.solved?.[i]?'found':'still a mystery'}</small></div>)}</section></div>
+    {myTurn&&<form className="action-form wide" onSubmit={e=>{e.preventDefault();send('guess',guess.trim(),selected);setGuess('');}}><Field label={`Your guess for word ${selected+1}`}><input autoFocus value={guess} onChange={e=>setGuess(e.target.value)} maxLength={80} required placeholder="I think it’s…" disabled={disabled}/></Field><div className="form-buttons"><Button secondary type="button" disabled={disabled||!board.masks[selected]?.includes('·')} onClick={()=>send('hint','',selected)}><Lightbulb size={16}/> Reveal a letter · end turn</Button><Button disabled={disabled||!guess.trim()}>Take a guess<ArrowRight size={17}/></Button></div></form>}{s.phase==='pending'&&<Notice>Checking that little guess…</Notice>}
+  </>;
+}
+function Clues({s,secret,uid,name,disabled,send,mutate,act,secretPath,now}) {
+  const [word,setWord]=useState(''),[hint,setHint]=useState(''),[guess,setGuess]=useState('');
+  const giver=s.giver===uid, reveal=s.phase==='reveal';
+  const prepare=e=>{e.preventDefault();act(async()=>{if(!normalize(word))throw Error('Choose a word with letters or numbers.');await set(ref(db,secretPath),{gameId:s.id,round:s.round,word:word.trim()});await mutate(v=>({...v,phase:'hint'}),s);});};
+  const sendHint=e=>{e.preventDefault();act(()=>{if(normalize(hint)===normalize(secret?.word))throw Error('Keep the answer a secret. Try a different hint.');return mutate(v=>({...v,hints:[...(v.hints||[]),hint.trim()],hintIndex:v.hintIndex+1,used:0,phase:'guess',deadline:deadline(v,now)}),s);}).then(()=>setHint(''));};
+  return <><div className="stage-title"><Tag>{reveal?'THE LITTLE REVEAL':giver?'YOU’RE THE CLUE GIVER':'YOU’RE THE WORD FINDER'}</Tag><h2>{reveal?s.result.correct?'That’s the word!':'A good little mystery.':s.phase==='prepare'?giver?'What’s your secret word?':`${name(s.giver)} is choosing a word.`:giver?'A little hint goes a long way.':'Three hints. One little lightbulb.'}</h2><p>{reveal?`The secret word was “${s.result.word}”.`:giver&&secret?<>Your secret word: <strong>{secret.word}</strong> · only you can see this.</>:`${s.config.guessesPerHint} ${s.config.guessesPerHint===1?'guess':'guesses'} per hint. Make them count.`}</p></div>
+    {s.phase==='prepare'&&giver&&<form className="action-form wide" onSubmit={prepare}><Field label="Your secret word"><input autoFocus value={word} onChange={e=>setWord(e.target.value)} placeholder="Something worth guessing…" maxLength={40} pattern="[^\s]+" title="One word without spaces" required disabled={disabled}/></Field><WordIdeas category={s.config.category} onPick={setWord}/><Button disabled={disabled||!word.trim()}>Keep this word a secret<EyeOff size={17}/></Button></form>}
+    {s.phase!=='prepare'&&<><div className="hint-cards">{[0,1,2].map(i=><div key={i} className={`hint-card ${s.hints?.[i]?'revealed':''}`}><span>HINT {i+1}</span><strong>{s.hints?.[i]||'?'}</strong><small>{s.hints?.[i]?'a little piece of the puzzle':'a little mystery'}</small></div>)}</div>
+    {giver&&s.phase==='hint'&&<form onSubmit={sendHint} className="action-form"><Field label={`Hint ${(s.hints?.length||0)+1} · one word only`}><input autoFocus value={hint} onChange={e=>setHint(e.target.value)} maxLength={40} pattern="[^\s]+" title="Use one word for your hint" required placeholder="Your little hint…" disabled={disabled}/></Field><Button disabled={disabled||!hint.trim()}>Share this hint<Send size={16}/></Button></form>}
+    {!giver&&s.phase==='guess'&&<form className="action-form" onSubmit={e=>{e.preventDefault();send('guess',guess.trim());setGuess('');}}><Field label={`${s.config.guessesPerHint-s.used} ${s.config.guessesPerHint-s.used===1?'guess':'guesses'} left for this hint`}><input autoFocus value={guess} onChange={e=>setGuess(e.target.value)} required maxLength={80} placeholder="Could it be…" disabled={disabled}/></Field><Button disabled={disabled||!guess.trim()}>Take a guess<ArrowRight size={17}/></Button></form>}
+    {!!s.attempts?.length&&<div className="guess-history"><span>YOUR LITTLE TRAIL OF GUESSES</span><div>{s.attempts.map((a,i)=><span key={i} className={a.correct?'correct':''}>{a.guess} {a.correct?'✓':'×'}</span>)}</div></div>}
+    {reveal&&<div className="reveal-points"><strong>+{s.result.points}</strong><span>{s.result.points?'A little victory for the word finder.':'Some words like to stay mysterious.'}</span></div>}
+    {giver&&s.phase==='guess'&&<Notice>Let’s see what {name(other(s,uid))} makes of that.</Notice>}{!giver&&s.phase==='hint'&&<Notice>The next hint is on its way.</Notice>}{s.phase==='pending'&&<Notice>Checking your guess…</Notice>}</>}
+  </>;
+}
