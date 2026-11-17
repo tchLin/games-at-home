@@ -1,6 +1,6 @@
 import test from "node:test";
 import { WHEEL_ZONES, spinTarget } from "../src/wheel.js";
-import { nextWordIdeas } from "../src/word-links.js";
+import { nextWordIdeas, wordSuggestions } from "../src/word-links.js";
 import assert from "node:assert/strict";
 import {
   newGame,
@@ -188,4 +188,33 @@ test("chain suggestions follow the previous word, exclude used words, and allow 
   assert.deepEqual(nextWordIdeas("inventedword"), []);
   assert.deepEqual(nextWordIdeas("constructor"), []);
   assert.deepEqual(nextWordIdeas("__proto__"), []);
+});
+
+test("fuzzy suggestions handle typing, transpositions, plurals, and accents", () => {
+  for (const [typed, matched, kind, suggestion] of [
+    ["cof", "coffee", "partial", "shop"],
+    ["cofee", "coffee", "typo", "shop"],
+    ["cofefe", "coffee", "typo", "shop"],
+    ["shpo", "shop", "typo", "window"],
+    ["shops", "shop", "plural", "window"],
+    ["phones", "phone", "plural", "book"],
+    ["mice", "mouse", "plural", "pad"],
+    ["CAFÉ", "cafe", "exact", "coffee"],
+  ]) {
+    const result = wordSuggestions(typed);
+    assert.ok(result.matches.some((match) => match.word === matched && match.kind === kind), typed);
+    assert.ok(result.ideas.includes(suggestion), typed);
+  }
+});
+test("reverse associations broaden coverage while exact phrase continuations rank first", () => {
+  assert.ok(nextWordIdeas("bean").includes("coffee"));
+  const ideas = nextWordIdeas("shop");
+  assert.ok(ideas.indexOf("window") < ideas.indexOf("coffee"));
+  assert.deepEqual(wordSuggestions("car").matches.map((match) => match.word), ["car"]);
+  assert.ok(!nextWordIdeas("cofee", ["shops"]).includes("shop"));
+  assert.ok(nextWordIdeas("coffee", [], "sh").every((word) => word.startsWith("sh")));
+});
+test("uncertain or invalid words produce no noisy fuzzy fallback", () => {
+  for (const word of ["", "co", "zzzzzz", "x".repeat(41), "__proto__", "constructor", "coffee<script>"])
+    assert.deepEqual(wordSuggestions(word), { matches: [], ideas: [] });
 });

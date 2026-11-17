@@ -2,6 +2,9 @@
 // can use any words and explain their connections to each other on the call.
 const pairs = {
   coffee: 'shop bean cup table maker break cake pot grounds house',
+  cafe: 'coffee tea pastry espresso table menu',
+  espresso: 'coffee cup machine shot',
+  barista: 'coffee cafe apron',
   shop: 'window keeper assistant floor lifting front',
   lifting: 'weights equipment truck',
   truck: 'driver stop load bed',
@@ -278,13 +281,95 @@ const pairs = {
   home: 'work town land page',
   page: 'turner number',
 };
-const key = (word) => String(word || '').trim().toLowerCase();
-export const nextWordIdeas = (previous, exclude = [], prefix = '') => {
-  const used = new Set(exclude.map(key));
-  const typed = key(prefix);
-  const previousKey = key(previous);
-  const matches = Object.hasOwn(pairs, previousKey) ? pairs[previousKey] : '';
-  return matches.split(' ').filter((word) =>
-    word && !used.has(word) && (!typed || word.startsWith(typed)),
-  ).slice(0, 10);
-};
+const key = (word) => String(word || '').trim().normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+// Forward phrase continuations rank first. Reverse links also make useful
+// associations (bean → coffee), extending coverage without a model or network.
+const graph = new Map();
+function link(from, to, weight) {
+  if (!graph.has(from)) graph.set(from, new Map());
+  const neighbors = graph.get(from);
+  neighbors.set(to, Math.max(weight, neighbors.get(to) || 0));
+}
+for (const [from, words] of Object.entries(pairs)) {
+  for (const to of words.split(' ')) {
+    link(from, to, 2);
+    link(to, from, 1);
+  }
+}
+const vocabulary = [...graph.keys()];
+const irregular = new Map([
+  ['children', 'child'], ['feet', 'foot'], ['teeth', 'tooth'],
+  ['mice', 'mouse'], ['geese', 'goose'], ['men', 'man'], ['women', 'woman'],
+  ['leaves', 'leaf'], ['knives', 'knife'], ['shelves', 'shelf'],
+]);
+function forms(word) {
+  const result = [word];
+  if (irregular.has(word)) result.push(irregular.get(word));
+  if (word.endsWith('ies')) result.push(word.slice(0, -3) + 'y');
+  if (/(ches|shes|xes|zes|sses)$/.test(word)) result.push(word.slice(0, -2));
+  if (word.endsWith('s') && !word.endsWith('ss')) result.push(word.slice(0, -1));
+  return result;
+}
+
+// Bounded Damerau-Levenshtein: insertion, deletion, replacement, or an adjacent
+// transposition. Small typed buffers and a fixed vocabulary bound the work.
+function distance(a, b, limit) {
+  if (Math.abs(a.length - b.length) > limit) return limit + 1;
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+  let beforePrevious;
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(previous[j] + 1, row[j - 1] + 1,
+        previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1])
+        row[j] = Math.min(row[j], beforePrevious[j - 2] + 1);
+    }
+    if (Math.min(...row) > limit) return limit + 1;
+    beforePrevious = previous;
+    previous = row;
+  }
+  return previous[b.length];
+}
+function matchWords(word) {
+  if (Object.hasOwn(pairs, word)) return [{ word, kind: 'exact', score: 100 }];
+  const variants = forms(word);
+  const base = variants.slice(1).find((candidate) => graph.has(candidate));
+  if (base) return [{ word: base, kind: 'plural', score: 95 }];
+  if (graph.has(word)) return [{ word, kind: 'exact', score: 100 }];
+  if (word.length < 3) return [];
+  const completions = vocabulary.filter((candidate) => candidate.startsWith(word))
+    .sort((a, b) => a.length - b.length || a.localeCompare(b));
+  if (completions.length)
+    return completions.slice(0, 3).map((candidate) => ({ word: candidate, kind: 'partial', score: 90 }));
+  const limit = word.length >= 6 ? 2 : 1;
+  return vocabulary.map((candidate) => {
+    const edits = Math.min(...variants.map((variant) => distance(variant, candidate, limit)));
+    return { word: candidate, kind: 'typo', edits, score: 80 - edits * 10 };
+  }).filter((candidate) => candidate.edits <= limit)
+    .sort((a, b) => a.edits - b.edits || a.word.localeCompare(b.word)).slice(0, 3);
+}
+
+export function wordSuggestions(previous, exclude = [], prefix = '') {
+  const word = key(previous);
+  // Ignore inputs outside the small English word index; custom words still play.
+  if (!/^[a-z]{1,40}$/.test(word)) return { matches: [], ideas: [] };
+  const matches = matchWords(word);
+  const used = new Set(exclude.flatMap((value) => forms(key(value))));
+  used.add(word);
+  matches.forEach((match) => used.add(match.word));
+  const ranked = new Map();
+  for (const match of matches) {
+    for (const [candidate, weight] of graph.get(match.word)) {
+      if (used.has(candidate) || !candidate.startsWith(key(prefix))) continue;
+      const score = match.score + weight * 5;
+      if (score > (ranked.get(candidate) ?? -1)) ranked.set(candidate, score);
+    }
+  }
+  const ideas = [...ranked].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([candidate]) => candidate);
+  return { matches, ideas };
+}
+export const nextWordIdeas = (previous, exclude = [], prefix = '') =>
+  wordSuggestions(previous, exclude, prefix).ideas;

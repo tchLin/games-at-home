@@ -173,6 +173,15 @@ describe("cozy home and game forms", () => {
     expect(screen.queryByRole("button", { name: "bean", exact: true })).toBeNull();
     expect(screen.getByRole("button", { name: "walker", exact: true })).toBeTruthy();
   });
+  it("labels fuzzy suggestions without rewriting the player's word", () => {
+    render(<Game {...props("chain")} />);
+    fireEvent.change(screen.getByLabelText("Word 1"), { target: { value: "cofee" } });
+    expect(screen.getByText(/Ideas based on “coffee”/)).toBeTruthy();
+    expect(screen.getByLabelText("Word 1").value).toBe("cofee");
+    fireEvent.click(screen.getByRole("button", { name: "shop", exact: true }));
+    expect(screen.getByLabelText("Word 1").value).toBe("cofee");
+    expect(screen.getByLabelText("Word 2").value).toBe("shop");
+  });
   it("shows all seven scoring wedges to the giver and reveals them with the guess", () => {
     const p = props("wheel", { secret: { gameId: "ui-match", round: 1, target: 60 } });
     p.room.state = { ...p.room.state, topicLabel: "Pokémon", phase: "clue" };

@@ -16,7 +16,7 @@ import { GAMES, suggestions } from "./content.js";
 import { other, deadline, nextRound, maskWord, normalize } from "./engine.js";
 import { Dial } from "./art.jsx";
 import { spinTarget } from "./wheel.js";
-import { nextWordIdeas } from "./word-links.js";
+import { wordSuggestions } from "./word-links.js";
 import { Button, Field, Tag, Notice } from "./App.jsx";
 export default function Game(props) {
   const {
@@ -387,7 +387,7 @@ function Chain({
   if (s.phase === "setup") {
     const suggestionIndex = words[editing].trim() ? editing + 1 : editing;
     const previous = suggestionIndex > 0 ? words[suggestionIndex - 1].trim() : "";
-    const ideas = nextWordIdeas(previous, words.filter((_, i) => i !== suggestionIndex));
+    const { ideas, matches } = wordSuggestions(previous, words.filter((_, i) => i !== suggestionIndex));
     const save = (e) => {
       e.preventDefault();
       act(async () => {
@@ -466,6 +466,9 @@ function Chain({
                   : suggestionIndex >= words.length ? "Your chain is complete. Read it through together after the game."
                   : `After “${previous}”, try…`}
               </span></div>
+              {suggestionIndex < words.length && matches.some((match) => match.kind !== "exact") && (
+                <p className="muted">Ideas based on {matches.map((match) => `“${match.word}”`).join(", ")}. Your word stays as you typed it.</p>
+              )}
               {suggestionIndex < words.length && previous && (
                 ideas.length ? <div className="suggestion-chips">
                   {ideas.map((word) => <button type="button" key={word} disabled={disabled}
@@ -474,7 +477,7 @@ function Chain({
                       setEditing(suggestionIndex);
                       document.getElementById(`chain-word-${suggestionIndex}`)?.focus();
                     }}>{word}</button>)}
-                </div> : <p className="muted">No built-in suggestions for this word yet. Type your own connection in word {suggestionIndex + 1}.</p>
+                </div> : <p className="muted">No close matches yet. Type your own connection in word {suggestionIndex + 1}.</p>
               )}
               <small>Ideas are optional. Any meaningful connection works—talk it through on your call. Example: coffee → shop → window → shopping → cart.</small>
             </div>
