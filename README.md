@@ -4,11 +4,11 @@ A warm little place for two people to play together from separate devices. React
 
 ## Games
 
-- **Blind Wheel:** the clue giver sees a secret target on a scale, sends a clue, and the other player guesses the position. Proximity awards shared points. Roles alternate.
-- **Word by Word:** each player creates an unrelated word list. The other sees first letters. Correct answers keep the turn; misses and letter requests pass it. Includes curated suggestions, with no paid AI service.
+- **Blind Wheel:** choose a topic (for example Pokémon); the system supplies topic-specific opposites each round. The clue giver spins a hidden 1–2–3–4–3–2–1 scoring band, then names something in the topic to guide their partner toward the 4-point center. The guesser places the needle; revealing the band awards 0–4 shared points. Roles alternate.
+- **Word by Word:** each player builds a connected word chain, such as coffee → shop → window → shopping → cart. Suggestions update locally from the word being typed, using a bundled collection of phrase and compound-word continuations. They are optional, not a semantic validator: players can type any words and discuss their connections on a call. The other player sees first letters. Correct answers keep the turn; misses and letter requests pass it. No topics or paid AI service.
 - **Three Little Clues:** a secret word and three single-word hints. The host chooses one to five guesses per hint. Earlier solves score more points.
 
-Hosts select games, rounds, timers, word counts, suggestion categories, and custom scale labels in the lobby. The guest reviews settings before starting. Guess timers pause when either player disconnects. Guests can host or join with a nickname, with no signup. Rejoin using the same browser and room code; clearing browser data or changing sign-in loses an anonymous seat. Google players can rejoin with the same account on another device. Hosts end rooms explicitly. An absent host's room expires after 24 hours; connected hosts renew its lease each minute.
+Hosts select games, rounds, timers, word counts, clue suggestion categories, and wheel topics in the lobby. The guest reviews settings before starting. Guess timers pause when either player disconnects. Guests can host or join with a nickname, with no signup. Rejoin using the same browser and room code; clearing browser data or changing sign-in loses an anonymous seat. Google players can rejoin with the same account on another device. Hosts end rooms explicitly. An absent host's room expires after 24 hours; connected hosts renew its lease each minute.
 
 ## Run
 

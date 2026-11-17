@@ -11,7 +11,7 @@ export const GAMES = {
     name: "Word by Word",
     tag: "A little mystery, letter by letter",
     description:
-      "Make a secret word list. Trade guesses, uncover letters, and race to the last word.",
+      "Build a connected word chain. Follow the links, uncover letters, and race to the last word.",
     time: "10–15 min",
     color: "sage",
   },
@@ -24,23 +24,42 @@ export const GAMES = {
     color: "butter",
   },
 };
-export const TOPICS = [
-  ["Ugly Pokémon", "Pretty Pokémon"],
-  ["Terrible date", "Perfect date"],
-  ["Underrated", "Overrated"],
-  ["Cozy", "Chaotic"],
-  ["Everyday luxury", "Absolutely essential"],
-  ["Terrible superpower", "Amazing superpower"],
-  ["Boring food", "Exciting food"],
-  ["Tiny adventure", "Huge adventure"],
-  ["Cold", "Hot"],
-  ["Easy to do", "Hard to do"],
-  ["Villain energy", "Hero energy"],
-  ["A little romantic", "Very romantic"],
-  ["Quiet evening", "Wild night out"],
-  ["Bad gift", "Great gift"],
-  ["Realistic dream", "Impossible dream"],
-];
+export const WHEEL_TOPICS = {
+  pokemon: {
+    name: "Pokémon",
+    pairs: [["Ugly Pokémon", "Pretty Pokémon"], ["Weak Pokémon", "Powerful Pokémon"], ["Scary Pokémon", "Cute Pokémon"], ["Bad companion", "Great companion"]],
+  },
+  food: {
+    name: "Food & drinks",
+    pairs: [["Bland", "Flavorful"], ["Everyday snack", "Special treat"], ["Comfort food", "Adventurous food"], ["Cold", "Hot"]],
+  },
+  animals: {
+    name: "Animals",
+    pairs: [["Scary", "Cute"], ["Slow", "Fast"], ["Tiny", "Huge"], ["Bad pet", "Great pet"]],
+  },
+  dates: {
+    name: "Date ideas",
+    pairs: [["Terrible date", "Perfect date"], ["Relaxing", "Adventurous"], ["Budget friendly", "Expensive"], ["A little romantic", "Very romantic"]],
+  },
+  characters: {
+    name: "Fictional characters",
+    pairs: [["Villain", "Hero"], ["Weak", "Powerful"], ["Chaotic", "Dependable"], ["Scary", "Lovable"]],
+  },
+  everyday: {
+    name: "Everyday things",
+    pairs: [["Useless", "Essential"], ["Boring", "Exciting"], ["Cheap", "Expensive"], ["Uncomfortable", "Cozy"]],
+  },
+};
+export function wheelPrompt(config, seed, round) {
+  if (config.topic === "custom")
+    return { topicLabel: "Your topic", left: config.left, right: config.right };
+  const topics = Object.values(WHEEL_TOPICS);
+  const topic = Object.hasOwn(WHEEL_TOPICS, config.topic)
+    ? WHEEL_TOPICS[config.topic]
+    : topics[(seed + round - 1) % topics.length];
+  const pair = topic.pairs[(Math.floor(seed / topics.length) + round - 1) % topic.pairs.length];
+  return { topicLabel: topic.name, left: pair[0], right: pair[1] };
+}
 export const WORDS = {
   Everyday:
     "coffee blanket bicycle candle window notebook pillow garden umbrella kitchen sweater mirror postcard suitcase balloon camera ladder hammock key pocket basket button clock pencil ribbon envelope library train bridge lighthouse fountain backpack telescope compass puzzle lantern bookshelf teapot doormat headphones whistle mailbox curtain necklace ticket cabin elevator newspaper sidewalk scissors wallet airplane paintbrush".split(

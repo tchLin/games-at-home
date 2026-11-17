@@ -1,3 +1,5 @@
+import { WHEEL_ZONES } from "./wheel.js";
+
 export function WheelArt({ small = false }) {
   return (
     <svg
@@ -165,75 +167,41 @@ export function GameArt({ game }) {
     <ClueArt />
   );
 }
-export function Dial({
-  target,
-  guess = 50,
-  showGuess = false,
-  result = false,
-}) {
-  const xy = (v) => {
-    const a = Math.PI * (1 - v / 100);
-    return [150 + 112 * Math.cos(a), 145 - 112 * Math.sin(a)];
+export function Dial({ target, guess = 50, showGuess = false }) {
+  const xy = (v, radius = 112) => {
+    const angle = Math.PI * (1 - v / 100);
+    return [150 + radius * Math.cos(angle), 145 - radius * Math.sin(angle)];
   };
-  const p = xy(guess),
-    t = xy(target ?? 50);
+  const p = xy(guess);
   return (
-    <svg
-      className="dial"
-      viewBox="0 0 300 174"
-      role="img"
-      aria-label={
-        target == null
-          ? "The target is hidden"
-          : `Target: ${target} out of 100${showGuess ? `. Guess: ${guess}` : ""}`
-      }
-    >
-      <path d="M22 145a128 128 0 0 1 256 0" fill="#e6c0a6" />
-      <path d="M43 145a107 107 0 0 1 214 0" fill="#f0dcac" />
-      <path d="M68 145a82 82 0 0 1 164 0" fill="#bac5a9" />
-      <path d="M95 145a55 55 0 0 1 110 0" fill="#e6b288" />
-      {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((v) => {
-        const a = xy(v);
-        return <circle key={v} cx={a[0]} cy={a[1]} r="1.8" fill="#715d46" />;
+    <svg className="dial" viewBox="0 0 300 174" role="img"
+      aria-label={target == null
+        ? "The scoring band is hidden"
+        : `Scoring band: 1, 2, 3, 4, 3, 2, 1. Four-point center: ${target} out of 100${showGuess ? `. Guess: ${guess}` : ""}`}>
+      <path d="M22 145a128 128 0 0 1 256 0Z" fill="#eee2cf" />
+      {target != null && WHEEL_ZONES.map((zone, index) => {
+        const from = Math.max(0, target + zone.from);
+        const to = Math.min(100, target + zone.to);
+        if (from >= to) return null;
+        const start = xy(from, 128), end = xy(to, 128), label = xy((from + to) / 2, 99);
+        return <g key={index}>
+          <path d={`M150 145 L${start.join(" ")} A128 128 0 0 1 ${end.join(" ")} Z`}
+            fill={zone.color} stroke="#faf6ec" strokeWidth=".7" />
+          <text x={label[0]} y={label[1]} textAnchor="middle" dominantBaseline="middle"
+            fill={zone.points === 4 ? "#fff" : "#473f32"} fontSize="12" fontWeight="700">{zone.points}</text>
+        </g>;
       })}
-      {target != null && (
-        <>
-          <path
-            d={`M150 145L${t[0]} ${t[1]}`}
-            stroke="#b4573b"
-            strokeWidth="15"
-            opacity=".35"
-          />
-          <circle cx={t[0]} cy={t[1]} r="6" fill="#b4573b" />
-        </>
-      )}
-      {showGuess && (
-        <path
-          d={`M150 145L${p[0]} ${p[1]}`}
-          stroke="#4a4436"
-          strokeWidth="3.5"
-          strokeLinecap="round"
-        />
-      )}
+      {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((value) => {
+        const dot = xy(value, 136);
+        return <circle key={value} cx={dot[0]} cy={dot[1]} r="1.3" fill="#8c8171" />;
+      })}
+      {showGuess && <path d={`M150 145L${p[0]} ${p[1]}`} stroke="#4a4436"
+        strokeWidth="3.5" strokeLinecap="round" />}
       <circle cx="150" cy="145" r="9" fill="#4a4436" />
-      {!showGuess && target == null && (
-        <text
-          x="150"
-          y="109"
-          textAnchor="middle"
-          fontSize="26"
-          fill="#6c634e"
-          fontFamily="Georgia"
-        >
-          ?
-        </text>
-      )}
-      <text x="20" y="168" fill="#8c8171" fontSize="10">
-        0
-      </text>
-      <text x="271" y="168" fill="#8c8171" fontSize="10">
-        100
-      </text>
+      {!showGuess && target == null && <text x="150" y="92" textAnchor="middle"
+        fontSize="26" fill="#6c634e" fontFamily="Georgia">?</text>}
+      <text x="20" y="168" fill="#8c8171" fontSize="10">0</text>
+      <text x="271" y="168" fill="#8c8171" fontSize="10">100</text>
     </svg>
   );
 }

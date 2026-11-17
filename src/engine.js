@@ -1,4 +1,6 @@
-import { TOPICS } from "./content.js";
+import { wheelPrompt } from "./content.js";
+import { wheelPoints } from "./wheel.js";
+export { wheelPoints } from "./wheel.js";
 export const normalize = (value) =>
   String(value || "")
     .normalize("NFD")
@@ -25,15 +27,10 @@ export function newRound(s, now = Date.now()) {
     revision: (s.revision || 0) + 1,
   };
   if (s.game === "wheel") {
-    const labels =
-      s.config.topic === "custom"
-        ? [s.config.left, s.config.right]
-        : TOPICS[(s.round + s.topicSeed) % TOPICS.length];
     return {
       ...common,
       topicSeed: s.topicSeed,
-      left: labels[0],
-      right: labels[1],
+      ...wheelPrompt(s.config, s.topicSeed, s.round),
     };
   }
   if (s.game === "chain")
@@ -49,7 +46,7 @@ export function newGame(config, players, id, now = Date.now()) {
       players,
       scores: Object.fromEntries(players.map((p) => [p, 0])),
       round: 1,
-      topicSeed: Math.floor(Math.random() * TOPICS.length),
+      topicSeed: Math.floor(Math.random() * 100),
     },
     now,
   );
@@ -58,10 +55,6 @@ export function nextRound(s, now = Date.now()) {
   if (s.round >= s.config.rounds || s.game === "chain")
     return { ...s, phase: "finished", deadline: 0 };
   return newRound({ ...s, round: s.round + 1 }, now);
-}
-export function wheelPoints(target, guess) {
-  const gap = Math.abs(target - guess);
-  return gap <= 4 ? 4 : gap <= 10 ? 3 : gap <= 18 ? 2 : gap <= 26 ? 1 : 0;
 }
 export function resolve(s, secret, now = Date.now()) {
   if (s.phase !== "pending" || !s.pending || !secret) return null;

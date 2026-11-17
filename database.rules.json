@@ -188,6 +188,9 @@
           "topicSeed": {
             ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
           },
+          "topicLabel": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 40"
+          },
           "left": {
             ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
           },

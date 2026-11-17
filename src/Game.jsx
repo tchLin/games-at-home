@@ -15,6 +15,8 @@ import { db, ref, set } from "./firebase.js";
 import { GAMES, suggestions } from "./content.js";
 import { other, deadline, nextRound, maskWord, normalize } from "./engine.js";
 import { Dial } from "./art.jsx";
+import { spinTarget } from "./wheel.js";
+import { nextWordIdeas } from "./word-links.js";
 import { Button, Field, Tag, Notice } from "./App.jsx";
 export default function Game(props) {
   const {
@@ -203,7 +205,7 @@ function Wheel({
       await set(ref(db, secretPath), {
         gameId: s.id,
         round: s.round,
-        target: 5 + (crypto.getRandomValues(new Uint32Array(1))[0] % 91),
+        target: spinTarget(),
       });
       await mutate((v) => ({ ...v, phase: "clue" }), s);
     });
@@ -230,14 +232,15 @@ function Wheel({
         </h2>
         <p>
           {reveal
-            ? "The terracotta marker is the target. The dark needle is the guess."
+            ? "The band scores 1–2–3–4–3–2–1. The dark needle is your guess; outside the band scores 0."
             : giver
-              ? "Only you can see the secret target. Think of a clue that belongs at this spot."
+              ? "Spin to reveal your secret scoring band. Name something in the topic that leads your partner to the 4-point zone."
               : s.clue
-                ? "Where does that clue belong? Trust your instinct."
+                ? "Place the needle where this clue belongs between the two opposites. Aim for the hidden 4-point zone."
                 : "The target stays hidden. Your clue is on its way."}
         </p>
       </div>
+      <p className="wheel-topic"><span>TOPIC</span> {s.topicLabel || "Your topic"}</p>
       <div className="wheel-panel">
         <Dial
           target={target}
@@ -252,7 +255,7 @@ function Wheel({
         </div>
         {giver && !reveal && secret && (
           <div className="secret-target">
-            <EyeOff size={14} /> Secret target:{" "}
+            <EyeOff size={14} /> Secret 4-point center:{" "}
             <strong>{secret.target}/100</strong>
           </div>
         )}
@@ -282,7 +285,7 @@ function Wheel({
               autoFocus
               value={clue}
               onChange={(e) => setClue(e.target.value)}
-              placeholder="A word, a Pokémon, a little idea…"
+              placeholder={s.topicLabel === "Pokémon" ? "Name a Pokémon…" : `Name something in ${s.topicLabel || "this topic"}…`}
               maxLength={80}
               required
               disabled={disabled}
@@ -372,7 +375,8 @@ function Chain({
 }) {
   const [words, setWords] = useState(Array(s.config.wordCount).fill("")),
     [guess, setGuess] = useState(""),
-    [selected, setSelected] = useState(0);
+    [selected, setSelected] = useState(0),
+    [editing, setEditing] = useState(0);
   const opponent = other(s, uid),
     board = s.boards?.[opponent],
     myBoard = s.boards?.[uid];
@@ -381,6 +385,9 @@ function Chain({
       setSelected(board.masks.findIndex((_, i) => !board.solved?.[i]));
   }, [board]);
   if (s.phase === "setup") {
+    const suggestionIndex = words[editing].trim() ? editing + 1 : editing;
+    const previous = suggestionIndex > 0 ? words[suggestionIndex - 1].trim() : "";
+    const ideas = nextWordIdeas(previous, words.filter((_, i) => i !== suggestionIndex));
     const save = (e) => {
       e.preventDefault();
       act(async () => {
@@ -409,16 +416,16 @@ function Chain({
     return (
       <>
         <div className="stage-title">
-          <Tag>YOUR SECRET LITTLE LIST</Tag>
+          <Tag>YOUR SECRET WORD CHAIN</Tag>
           <h2>
             {myBoard
               ? "Your words are tucked away."
-              : "A word for every little possibility."}
+              : "One word leads to another."}
           </h2>
           <p>
             {myBoard
-              ? `Waiting for ${name(opponent)} to finish their list.`
-              : `Pick ${s.config.wordCount} unrelated words. Your person will only see the first letter of each.`}
+              ? `Waiting for ${name(opponent)} to finish their chain.`
+              : `Build ${s.config.wordCount} connected words, one at a time. Each neighboring pair should make sense together. Your person sees only first letters.`}
           </p>
         </div>
         {myBoard ? (
@@ -437,44 +444,41 @@ function Chain({
                 <Field key={i} label={`Word ${i + 1}`}>
                   <input
                     value={w}
-                    onChange={(e) =>
-                      setWords((list) =>
-                        list.map((x, j) => (i === j ? e.target.value : x)),
-                      )
-                    }
+                    id={`chain-word-${i}`}
+                    onFocus={() => setEditing(i)}
+                    onChange={(e) => {
+                      setEditing(i);
+                      setWords((list) => list.map((x, j) => i === j ? e.target.value : x));
+                    }}
                     maxLength={40}
                     required
                     pattern="[^\s]+"
                     title="One word without spaces"
-                    disabled={disabled}
-                    placeholder={i === 0 ? "coffee" : "Your secret word"}
+                    disabled={disabled || (i > 0 && !words[i - 1].trim())}
+                    placeholder={i === 0 ? "Start anywhere, e.g. coffee" : `Connect to word ${i}`}
                   />
                 </Field>
               ))}
             </div>
-            <WordIdeas
-              category={s.config.category}
-              exclude={words}
-              onPick={(word) =>
-                setWords((list) => {
-                  const index = list.findIndex((w) => !w.trim());
-                  return list.map((w, i) =>
-                    i === (index < 0 ? list.length - 1 : index) ? word : w,
-                  );
-                })
-              }
-            />
+            <div className="word-ideas" aria-live="polite">
+              <div><span><Lightbulb size={15} />
+                {!previous ? "Choose your first word to see connected ideas."
+                  : suggestionIndex >= words.length ? "Your chain is complete. Read it through together after the game."
+                  : `After “${previous}”, try…`}
+              </span></div>
+              {suggestionIndex < words.length && previous && (
+                ideas.length ? <div className="suggestion-chips">
+                  {ideas.map((word) => <button type="button" key={word} disabled={disabled}
+                    onClick={() => {
+                      setWords((list) => list.map((value, i) => i === suggestionIndex ? word : value));
+                      setEditing(suggestionIndex);
+                      document.getElementById(`chain-word-${suggestionIndex}`)?.focus();
+                    }}>{word}</button>)}
+                </div> : <p className="muted">No built-in suggestions for this word yet. Type your own connection in word {suggestionIndex + 1}.</p>
+              )}
+              <small>Ideas are optional. Any meaningful connection works—talk it through on your call. Example: coffee → shop → window → shopping → cart.</small>
+            </div>
             <div className="form-buttons">
-              <Button
-                secondary
-                type="button"
-                disabled={disabled}
-                onClick={() =>
-                  setWords(suggestions(s.config.category, s.config.wordCount))
-                }
-              >
-                <Sparkles size={16} /> Suggest a whole list
-              </Button>
               <Button disabled={disabled || words.some((w) => !w.trim())}>
                 Tuck these away
                 <EyeOff size={16} />
@@ -493,7 +497,7 @@ function Chain({
         <h2>{myTurn ? "Follow the letters." : "A little thinking time."}</h2>
         <p>
           {myTurn
-            ? "Choose a word and take a guess. Get it right to keep going."
+            ? "Use the neighboring words and first letters to find the connections. Get a word right to keep going."
             : `${name(s.turn)} is working on your words.`}
         </p>
       </div>
@@ -535,7 +539,7 @@ function Chain({
         </section>
         <section className="my-list">
           <h3>
-            Your secret list
+            Your secret chain
             <EyeOff size={15} />
           </h3>
           {secret?.words.map((word, i) => (

@@ -58,6 +58,7 @@ const state = {
   deadline: num(0, 1e15),
   pausedAt: num(0, 1e15),
   topicSeed: num(0, 100),
+  topicLabel: str(40),
   left: str(60),
   right: str(60),
   clue: str(100),

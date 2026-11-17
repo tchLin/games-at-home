@@ -32,7 +32,7 @@ vi.mock("../src/firebase.js", () => ({
   roomPath: (code) => `rooms/${code[0]}`,
   slotOf: (code) => code[0],
 }));
-import App from "../src/App.jsx";
+import App, { Lobby } from "../src/App.jsx";
 import Game from "../src/Game.jsx";
 import { newGame } from "../src/engine.js";
 import { DEFAULT_SETTINGS } from "../src/content.js";
@@ -129,7 +129,9 @@ describe("cozy home and game forms", () => {
     const p = props("wheel", { uid: "guest", isHost: false });
     p.room.state = { ...p.room.state, phase: "guess", clue: "Pikachu" };
     render(<Game {...p} />);
-    expect(screen.queryByText(/Secret target:/)).toBeNull();
+    expect(screen.queryByText(/Secret 4-point center:/)).toBeNull();
+    expect(screen.getByRole("img", { name: "The scoring band is hidden" })).toBeTruthy();
+    expect(document.querySelectorAll(".dial text").length).toBe(2);
     fireEvent.change(screen.getByRole("slider"), { target: { value: "73" } });
     fireEvent.click(screen.getByRole("button", { name: /Lock in my guess/ }));
     await waitFor(() => expect(p.mutate).toHaveBeenCalled());
@@ -137,21 +139,59 @@ describe("cozy home and game forms", () => {
     expect(next.pending.value).toBe(73);
     expect(next.pending.actor).toBe("guest");
   });
-  it("fills a complete word list with distinct suggestions and keeps it private", async () => {
+  it("suggests connected words live and stores only their first letters in shared state", async () => {
     const p = props("chain");
     render(<Game {...p} />);
-    fireEvent.click(
-      screen.getByRole("button", { name: /Suggest a whole list/ }),
-    );
+    expect(screen.getByLabelText("Word 2").disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Word 1"), { target: { value: "coffee" } });
+    expect(screen.getByText("After “coffee”, try…")).toBeTruthy();
+    for (const next of ["shop", "window", "shopping", "cart"])
+      fireEvent.click(screen.getByRole("button", { name: next, exact: true }));
     const words = screen.getAllByRole("textbox").map((e) => e.value);
-    expect(words.length).toBe(5);
-    expect(new Set(words).size).toBe(5);
+    expect(words).toEqual(["coffee", "shop", "window", "shopping", "cart"]);
     fireEvent.click(screen.getByRole("button", { name: /Tuck these away/ }));
     await waitFor(() => expect(set).toHaveBeenCalled());
     expect(set.mock.calls[0][0]).toBe("secrets/1/host");
     expect(set.mock.calls[0][1].words).toEqual(words);
     const state = p.mutate.mock.calls[0][0](p.room.state);
-    expect(state.boards.host.masks.every((w) => w.includes("·"))).toBe(true);
+    expect(state.boards.host.masks).toEqual(["c·····", "s···", "w·····", "s·······", "c···"]);
+  });
+  it("allows custom connections without dictionary approval or explanations", async () => {
+    const p = props("chain");
+    render(<Game {...p} />);
+    const words = ["starlight", "campfire", "stories", "adventures", "memories"];
+    words.forEach((word, i) => fireEvent.change(screen.getByLabelText(`Word ${i + 1}`), { target: { value: word } }));
+    fireEvent.click(screen.getByRole("button", { name: /Tuck these away/ }));
+    await waitFor(() => expect(set).toHaveBeenCalled());
+    expect(set.mock.calls[0][1].words).toEqual(words);
+  });
+  it("updates suggestions immediately when a previous word is edited", () => {
+    render(<Game {...props("chain")} />);
+    fireEvent.change(screen.getByLabelText("Word 1"), { target: { value: "coffee" } });
+    expect(screen.getByRole("button", { name: "bean", exact: true })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Word 1"), { target: { value: "dog" } });
+    expect(screen.queryByRole("button", { name: "bean", exact: true })).toBeNull();
+    expect(screen.getByRole("button", { name: "walker", exact: true })).toBeTruthy();
+  });
+  it("shows all seven scoring wedges to the giver and reveals them with the guess", () => {
+    const p = props("wheel", { secret: { gameId: "ui-match", round: 1, target: 60 } });
+    p.room.state = { ...p.room.state, topicLabel: "Pokémon", phase: "clue" };
+    const { rerender } = render(<Game {...p} />);
+    expect(screen.getByText("Pokémon")).toBeTruthy();
+    expect([...document.querySelectorAll(".dial g text")].map((node) => node.textContent)).toEqual(["1", "2", "3", "4", "3", "2", "1"]);
+    p.room.state = { ...p.room.state, phase: "reveal", result: { target: 60, guess: 62, points: 4 } };
+    rerender(<Game {...p} uid="guest" isHost={false} />);
+    expect(screen.getByRole("img", { name: /Four-point center: 60 out of 100. Guess: 62/ })).toBeTruthy();
+  });
+  it("offers wheel topics and no topic or mood picker for word chains", () => {
+    const room = { meta: { host: "host", guest: "guest" }, ready: {} };
+    const lobby = { room, uid: "host", isHost: true, base: "rooms/1", act: (fn) => fn(), bothOnline: true };
+    render(<Lobby {...lobby} settings={DEFAULT_SETTINGS} />);
+    expect(screen.getByLabelText("Topic")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Word by Word/ }));
+    expect(screen.queryByLabelText("Topic")).toBeNull();
+    expect(screen.queryByLabelText("Word suggestion mood")).toBeNull();
+    expect(screen.getByLabelText("Words per player")).toBeTruthy();
   });
   it("shows the configured guesses per hint and does not expose the secret word", () => {
     const p = props("clues", { uid: "guest", isHost: false });

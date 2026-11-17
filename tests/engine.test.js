@@ -1,4 +1,6 @@
 import test from "node:test";
+import { WHEEL_ZONES, spinTarget } from "../src/wheel.js";
+import { nextWordIdeas } from "../src/word-links.js";
 import assert from "node:assert/strict";
 import {
   newGame,
@@ -8,7 +10,7 @@ import {
   maskWord,
   wheelPoints,
 } from "../src/engine.js";
-import { DEFAULT_SETTINGS } from "../src/content.js";
+import { WHEEL_TOPICS, wheelPrompt, DEFAULT_SETTINGS } from "../src/content.js";
 const create = (game, extra = {}) =>
   newGame(
     { ...DEFAULT_SETTINGS, game, ...extra },
@@ -32,8 +34,8 @@ test("wheel scores exact and nearby guesses, alternates roles, finishes at round
   assert.equal(s.giver, "guest");
   assert.equal(s.round, 2);
   assert.equal(nextRound(s).phase, "finished");
-  assert.equal(wheelPoints(50, 60), 3);
-  assert.equal(wheelPoints(50, 69), 1);
+  assert.equal(wheelPoints(50, 60), 2);
+  assert.equal(wheelPoints(50, 64), 1);
   assert.equal(wheelPoints(50, 90), 0);
 });
 test("wheel timeout reveals the target without awarding points", () => {
@@ -146,4 +148,44 @@ test("normalization and masking reveal only requested letters", () => {
   assert.equal(normalize("  CAFÉ! "), "cafe");
   assert.equal(maskWord("coffee"), "c·····");
   assert.equal(maskWord("coffee", 2), "co····");
+});
+
+test("the seven drawn scoring zones match the engine and fit every spin", () => {
+  assert.deepEqual(WHEEL_ZONES.map((zone) => zone.points), [1, 2, 3, 4, 3, 2, 1]);
+  for (const zone of WHEEL_ZONES)
+    assert.equal(wheelPoints(50, 50 + (zone.from + zone.to) / 2), zone.points);
+  for (const [gap, points] of [[2, 4], [3, 3], [6, 3], [7, 2], [10, 2], [11, 1], [14, 1], [15, 0]]) {
+    assert.equal(wheelPoints(50, 50 + gap), points);
+    assert.equal(wheelPoints(50, 50 - gap), points);
+  }
+  for (let i = 0; i < 100; i++) {
+    const target = spinTarget();
+    assert.ok(target >= 14 && target <= 86);
+  }
+});
+test("a selected topic supplies matching opposites and changes them across rounds", () => {
+  const config = { ...DEFAULT_SETTINGS, topic: "pokemon" };
+  const first = wheelPrompt(config, 0, 1);
+  assert.deepEqual(first, { topicLabel: "Pokémon", left: "Ugly Pokémon", right: "Pretty Pokémon" });
+  for (let round = 1; round <= 12; round++) {
+    const prompt = wheelPrompt(config, 0, round);
+    assert.equal(prompt.topicLabel, "Pokémon");
+    assert.ok(WHEEL_TOPICS.pokemon.pairs.some(([left, right]) => left === prompt.left && right === prompt.right));
+  }
+  assert.notEqual(wheelPrompt(config, 0, 2).left, first.left);
+  const game = create("wheel", { topic: "pokemon" });
+  assert.equal(game.topicLabel, "Pokémon");
+  assert.equal(nextRound(game).topicLabel, "Pokémon");
+});
+test("chain suggestions follow the previous word, exclude used words, and allow unknowns", () => {
+  assert.ok(nextWordIdeas(" COFFEE ").includes("shop"));
+  assert.ok(nextWordIdeas("shop").includes("lifting"));
+  assert.ok(nextWordIdeas("lifting").includes("truck"));
+  assert.ok(nextWordIdeas("shop").includes("window"));
+  assert.ok(nextWordIdeas("window").includes("shopping"));
+  assert.ok(nextWordIdeas("shopping").includes("cart"));
+  assert.ok(!nextWordIdeas("coffee", ["shop"]).includes("shop"));
+  assert.deepEqual(nextWordIdeas("inventedword"), []);
+  assert.deepEqual(nextWordIdeas("constructor"), []);
+  assert.deepEqual(nextWordIdeas("__proto__"), []);
 });

@@ -32,7 +32,7 @@ import {
   connect,
   disconnect,
 } from "./firebase.js";
-import { GAMES, DEFAULT_SETTINGS, WORDS, TOPICS } from "./content.js";
+import { GAMES, DEFAULT_SETTINGS, WORDS, WHEEL_TOPICS } from "./content.js";
 import { GameArt } from "./art.jsx";
 import { newGame } from "./engine.js";
 import { useRoom } from "./useRoom.js";
@@ -691,7 +691,7 @@ function Room({ code, user, onHome, report, act, busy }) {
     </main>
   );
 }
-function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline }) {
+export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline }) {
   const [draft, setDraft] = useState(settings);
   useEffect(() => setDraft(settings), [settings.version]);
   const change = (key, value) => setDraft((d) => ({ ...d, [key]: value }));
@@ -809,7 +809,7 @@ function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline }) {
                   </select>
                 </Field>
               )}
-              {cfg.game !== "wheel" && (
+              {cfg.game === "clues" && (
                 <Field label="Word suggestion mood">
                   <select
                     value={cfg.category}
@@ -824,51 +824,16 @@ function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline }) {
             </div>
             {cfg.game === "wheel" && (
               <>
-                <Field label="The two ends of your scale">
-                  <select
-                    value={cfg.topic}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v === "surprise" || v === "custom")
-                        change("topic", v);
-                      else {
-                        const [left, right] = TOPICS[+v];
-                        setDraft((d) => ({
-                          ...d,
-                          topic: "custom",
-                          left,
-                          right,
-                        }));
-                      }
-                    }}
-                  >
+                <Field label="Topic">
+                  <select value={cfg.topic} onChange={(e) => change("topic", e.target.value)}>
                     <option value="surprise">Surprise us each round</option>
-                    <option value="custom">Our own topic</option>
-                    {TOPICS.map((t, i) => (
-                      <option value={i} key={i}>
-                        {t.join(" ↔ ")}
-                      </option>
+                    {Object.entries(WHEEL_TOPICS).map(([id, topic]) => (
+                      <option key={id} value={id}>{topic.name}</option>
                     ))}
+                    {cfg.topic === "custom" && <option value="custom">Previous custom scale</option>}
                   </select>
                 </Field>
-                {cfg.topic === "custom" && (
-                  <div className="settings-grid">
-                    <Field label="Left end">
-                      <input
-                        value={cfg.left}
-                        onChange={(e) => change("left", e.target.value)}
-                        maxLength={60}
-                      />
-                    </Field>
-                    <Field label="Right end">
-                      <input
-                        value={cfg.right}
-                        onChange={(e) => change("right", e.target.value)}
-                        maxLength={60}
-                      />
-                    </Field>
-                  </div>
-                )}
+                <p className="muted">Each round comes with a pair of opposites for this topic.</p>
               </>
             )}
           </fieldset>
@@ -876,9 +841,9 @@ function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline }) {
             <strong>How this one works</strong>
             <p>
               {cfg.game === "wheel"
-                ? "The clue giver sees the secret target and sends a word or short clue. The other player places their guess on the scale. Reveal together and earn up to 4 shared points. Swap roles each round."
+                ? "The system gives a topic and a pair of opposites. Spin to see a hidden 1–2–3–4–3–2–1 scoring band. Name something in that topic that would lead your partner to the 4-point zone. They place the needle, then you reveal and score. Swap roles each round."
                 : cfg.game === "chain"
-                  ? "Build a secret list of unrelated words. Your partner sees the first letters. A correct guess keeps your turn; a wrong guess or an extra letter passes it. First to solve the other list wins."
+                  ? "Build a secret chain: every neighboring pair must form a meaningful connection, like coffee → shop → window → shopping → cart. Suggestions follow the word you type. Your partner sees first letters. Correct guesses keep your turn; wrong guesses or extra letters pass it. First to solve the other chain wins."
                   : "Choose one secret word. Give three single-word hints, one at a time. Your partner gets the selected number of guesses per hint. Earlier solves earn more points. Swap roles each round."}
             </p>
             <small>
