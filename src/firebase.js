@@ -24,6 +24,11 @@ import {
 } from "firebase/database";
 import { firebaseConfig } from "./config.js";
 import { DEFAULT_SETTINGS } from "./content.js";
+import {
+  roomPath,
+  isPermissionDenied,
+  joinRoom as joinRoomInDatabase,
+} from "./rooms.js";
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getDatabase(app);
@@ -63,8 +68,7 @@ export async function priorityAccess(user) {
     (await get(ref(db, `priority/${emailKey(user.email)}`))).val() === true
   );
 }
-export const slotOf = (code) => String(code)[0];
-export const roomPath = (code) => `rooms/${slotOf(code)}`;
+export { slotOf, roomPath } from "./rooms.js";
 export function roomCode(slot) {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   return (
@@ -88,7 +92,7 @@ export async function createRoom(uid, name, reserved = false, game = "wheel") {
         leaseEnd: now + 86400000,
       });
     } catch (error) {
-      if (String(error.code).toLowerCase().includes("permission")) continue;
+      if (isPermissionDenied(error)) continue;
       throw error;
     }
     const base = roomPath(code);
@@ -108,39 +112,8 @@ export async function createRoom(uid, name, reserved = false, game = "wheel") {
       : "All four public rooms are occupied. Please try again later.",
   );
 }
-export async function joinRoom(code, uid, name) {
-  if (!/^[0-4][A-Z2-9]{7}$/.test(code))
-    throw Error("Enter the eight-character room code, starting with 0–4.");
-  const base = roomPath(code);
-  let meta;
-  try {
-    meta = (await get(ref(db, `${base}/meta`))).val();
-  } catch (error) {
-    if (!String(error.code).toLowerCase().includes("permission")) throw error;
-    try {
-      await update(ref(db, `${base}/meta`), { guest: uid, joinCode: code });
-    } catch {
-      throw Error(
-        "That room is full, closed, or the code is incorrect. To rejoin, use your original guest browser or Google account.",
-      );
-    }
-    meta = (await get(ref(db, `${base}/meta`))).val();
-  }
-  if (!meta || meta.code !== code)
-    throw Error("That room wasn’t found. Check the eight-character code.");
-  if (!meta.open || meta.leaseEnd < Date.now())
-    throw Error(
-      "The host has ended this room. Create a new one to play again.",
-    );
-  if (meta.host !== uid) {
-    if (meta.guest && meta.guest !== uid)
-      throw Error(
-        "This room already has two players. To rejoin as a guest, use the same browser; otherwise use the same Google account.",
-      );
-    await update(ref(db, `${base}/meta`), { guest: uid, joinCode: code });
-  }
-  await set(ref(db, `${base}/players/${uid}`), { name });
-}
+export const joinRoom = (code, uid, name) =>
+  joinRoomInDatabase(db, code, uid, name);
 export function presence(code, uid, onConnection) {
   let connection;
   const unsubscribe = onValue(ref(db, ".info/connected"), async (snap) => {
@@ -179,7 +152,7 @@ export function friendlyError(error) {
   const code = error?.code || "";
   if (code.includes("network"))
     return "Connection interrupted. Check your internet and try again.";
-  if (code.includes("permission") || code.includes("PERMISSION"))
+  if (isPermissionDenied(error))
     return "This room is unavailable or has ended. Return home and try joining again.";
   if (code.includes("too-many"))
     return "Too many requests. Give it a moment, then try again.";

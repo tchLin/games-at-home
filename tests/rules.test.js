@@ -17,6 +17,7 @@ import {
 } from "firebase/database";
 import { newGame, resolve, maskWord } from "../src/engine.js";
 import { DEFAULT_SETTINGS } from "../src/content.js";
+import { joinRoom } from "../src/rooms.js";
 let env;
 const token = (email) => ({
   email,
@@ -270,4 +271,39 @@ test("closed rooms reject gameplay and allow a new host to reclaim the slot", as
     set(ref(g(), "secrets/1/guest"), { gameId: "x", round: 1, word: "coffee" }),
   );
   await assertSucceeds(set(ref(outsider(), "rooms/1/meta"), meta("stranger")));
+});
+
+test("actual invite flow admits a fresh anonymous client, saves its nickname, and reconnects", async () => {
+  const hostDb = anonymous("invite-host");
+  const guestDb = anonymous("fresh-guest");
+  await set(ref(hostDb, "rooms/2/meta"), meta("invite-host", "2"));
+  await assertSucceeds(joinRoom(guestDb, "2ABCDEFG", "fresh-guest", "Sam"));
+  assert.equal(
+    (await get(ref(hostDb, "rooms/2/players/fresh-guest/name"))).val(),
+    "Sam",
+  );
+  await assertSucceeds(
+    joinRoom(anonymous("fresh-guest"), "2ABCDEFG", "fresh-guest", "Sam again"),
+  );
+  await assertSucceeds(joinRoom(hostDb, "2ABCDEFG", "invite-host", "Host"));
+  await assert.rejects(
+    joinRoom(anonymous("third-guest"), "2ABCDEFG", "third-guest", "Third"),
+    /full, closed, or the code is incorrect/,
+  );
+});
+test("actual invite flow rejects wrong codes and anonymous reserved-room entry", async () => {
+  await set(ref(h(), "rooms/2/meta"), meta("host", "2"));
+  await assert.rejects(
+    joinRoom(anonymous("wrong-code"), "2ZZZZZZZ", "wrong-code", "Sam"),
+    /full, closed, or the code is incorrect/,
+  );
+  assert.equal((await get(ref(h(), "rooms/2/meta/guest"))).val(), null);
+  await set(
+    ref(context("owner", "owner@example.test"), "rooms/0/meta"),
+    meta("owner", "0"),
+  );
+  await assert.rejects(
+    joinRoom(anonymous("public-guest"), "0ABCDEFG", "public-guest", "Sam"),
+    /full, closed, or the code is incorrect/,
+  );
 });
