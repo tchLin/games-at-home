@@ -19,6 +19,7 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      - run: npm run check:secrets
       - run: npm test
       - run: npm run test:ui
       - uses: actions/setup-java@v4
@@ -28,6 +29,8 @@ jobs:
       - run: npm install --global firebase-tools@15.36.0
       - run: npm run test:rules
       - run: npm run build
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name != 'pull_request'
         with:

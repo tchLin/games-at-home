@@ -22,7 +22,11 @@ npm run test:ui
 npm run build
 ```
 
-Firebase's public web configuration is in `src/config.js`. This contains no administrative credential. Google sign-in needs the current domain in Firebase Authentication's authorized-domain list. For a different Firebase project, replace the public configuration and `.firebaserc` project ID.
+Firebase's project identifiers are in `src/config.js`. The browser key comes from `VITE_FIREBASE_API_KEY`: use an ignored `.env.local` file for development and a GitHub Actions secret for deployment. Copy `.env.example` and supply your own restricted key. Builds fail when this value is missing. No live key belongs in tracked source.
+
+**A `VITE_` value is included in the deployed browser JavaScript. It is not a runtime secret.** Firebase web keys identify a project; authentication, database rules, and API restrictions enforce access. The production key is restricted to `identitytoolkit.googleapis.com` and `securetoken.googleapis.com`, with website restrictions for the deployed site, the Firebase auth handler, and the documented localhost development origins. Keep origin referrers enabled; invitation paths are not sent cross-origin.
+
+Google sign-in needs the current domain in Firebase Authentication's authorized-domain list. For a different Firebase project, replace the configuration and `.firebaserc` project ID. Never reuse this browser key for paid Google APIs.
 
 ## Free operation
 
@@ -75,6 +79,6 @@ The tests use the `demo-games-at-home` emulator project. They cover unauthorized
 
 ## GitHub Pages
 
-Create a public repository, push this project on `main`, and select **Settings → Pages → Source → GitHub Actions**. The included workflow tests, builds, and deploys `dist`. No Firebase administrative token is required in GitHub Actions. Relative asset paths support a project URL such as `https://USERNAME.github.io/games-at-home/`.
+Create a public repository, set the Actions secret `VITE_FIREBASE_API_KEY` to your restricted browser key, push this project on `main`, and select **Settings → Pages → Source → GitHub Actions**. The included workflow scans tracked source for recognizable credentials, tests, builds, and deploys `dist`. No Firebase administrative token is required in GitHub Actions. Relative asset paths support a project URL such as `https://USERNAME.github.io/games-at-home/`.
 
 The workflow has read-only repository permission during builds. Only its deployment job receives Pages write and OIDC permissions. Pull requests run tests and builds but do not deploy.

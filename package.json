@@ -8,7 +8,8 @@
     "test": "node --test tests/engine.test.js",
     "rules:generate": "node scripts/generate-rules.mjs",
     "test:rules": "firebase emulators:exec --only database --project demo-games-at-home \"node --test tests/rules.test.js\"",
-    "test:ui": "vitest run tests/ui.test.jsx"
+    "test:ui": "vitest run tests/ui.test.jsx",
+    "check:secrets": "node scripts/check-secrets.mjs"
   },
   "keywords": [],
   "author": "",

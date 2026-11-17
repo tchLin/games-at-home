@@ -1,6 +1,8 @@
-// Firebase web configuration is public. Database rules enforce access.
+// Supplied at build time; never commit a live key here.
+// This browser key is still visible in the deployed bundle. Security relies on
+// Firebase rules and its API/website restrictions, not on hiding this value.
 export const firebaseConfig = {
-  apiKey: "AIzaSyCSGC91Sq1Pz6GnI5v_sYpXy_DdzVf7_do",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: "gaming-at-home.firebaseapp.com",
   databaseURL: "https://gaming-at-home-default-rtdb.firebaseio.com",
   projectId: "gaming-at-home",
