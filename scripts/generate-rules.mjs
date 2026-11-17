@@ -150,6 +150,20 @@ const state = {
   },
   $other: { ".validate": false },
 };
+const matchState = "root.child('rooms').child($slot).child('state')";
+const sameRequest = "newData.child('gameId').val() === data.child('gameId').val() && newData.child('requestId').val() === data.child('requestId').val() && newData.child('requestedBy').val() === data.child('requestedBy').val()";
+const currentRequest = `data.child('gameId').val() === ${matchState}.child('id').val()`;
+const gameChange = {
+  ".read": read,
+  ".write": `${write} && ((!newData.exists() && (${host} || data.child('accepted').val() === false)) || (newData.exists() && ((!data.exists() || data.child('gameId').val() !== ${matchState}.child('id').val()) && ${matchState}.exists() && newData.child('gameId').val() === ${matchState}.child('id').val() && newData.child('requestedBy').val() === auth.uid && newData.child('accepted').val() === false && newData.child('completed').val() === false) || (${sameRequest} && data.child('accepted').val() === false && data.child('completed').val() === false && ${currentRequest} && auth.uid !== data.child('requestedBy').val() && newData.child('accepted').val() === true && newData.child('completed').val() === false) || (${sameRequest} && ${host} && data.child('accepted').val() === true && newData.child('accepted').val() === true && newData.child('completed').val() === true && (${currentRequest} || (!${matchState}.exists() && data.child('completed').val() === true)) && !newData.parent().child('state').exists() && !newData.parent().child('ready').exists())))`,
+  ".validate": "newData.hasChildren(['gameId','requestId','requestedBy','accepted','completed'])",
+  gameId: str(50),
+  requestId: str(50),
+  requestedBy: str(128),
+  accepted: bool,
+  completed: bool,
+  $other: { ".validate": false },
+};
 const rules = {
   ".read": false,
   ".write": false,
@@ -213,6 +227,7 @@ const rules = {
         },
       },
       state,
+      gameChange,
       $other: { ".validate": false },
     },
   },

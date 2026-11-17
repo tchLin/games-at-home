@@ -36,6 +36,8 @@ import { GAMES, DEFAULT_SETTINGS, WORDS, WHEEL_TOPICS } from "./content.js";
 import { GameArt } from "./art.jsx";
 import { lobbyStartUpdate } from "./lobby.js";
 import { isPermissionDenied } from "./rooms.js";
+import { GameChangeControls } from "./GameChangeControls.jsx";
+import { requestGameChange, respondToGameChange } from "./game-change.js";
 import { SoundControls } from "./SoundControls.jsx";
 import { soundInteraction } from "./sound.js";
 import { useRoom } from "./useRoom.js";
@@ -633,22 +635,11 @@ function Room({ code, user, onHome, report, act, busy }) {
       </div>
       {room.state ? (
         <>
+          <GameChangeControls request={room.gameChange} gameId={room.state.id} uid={user.uid} name={name}
+            connected={connected} hostOnline={Boolean(room.presence?.[room.meta.host])} busy={busy}
+            onRequest={() => act(() => requestGameChange(db, base, room.state.id, user.uid))}
+            onRespond={(accept) => act(() => respondToGameChange(db, base, room.gameChange, user.uid, accept))} />
           <Game {...session} uid={user.uid} name={name} act={act} busy={busy} />
-          {isHost && (
-            <button
-              className="text-button back-to-lobby"
-              onClick={() => {
-                if (
-                  confirm(
-                    "End this match and return both players to game settings?",
-                  )
-                )
-                  act(() => set(ref(db, `${base}/state`), null));
-              }}
-            >
-              Back to game settings
-            </button>
-          )}
         </>
       ) : (
         <Lobby

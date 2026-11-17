@@ -6,4 +6,5 @@ export const lobbyStartUpdate = (base, settings, players, id) => ({
   [`${base}/settings`]: settings,
   [`${base}/state`]: newGame(settings, players, id),
   [`${base}/ready`]: null,
+  [`${base}/gameChange`]: null,
 });

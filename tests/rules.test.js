@@ -17,6 +17,7 @@ import {
 } from "firebase/database";
 import { newGame, resolve, maskWord, chainMasks, revealChain } from "../src/engine.js";
 import { DEFAULT_SETTINGS } from "../src/content.js";
+import { requestGameChange, respondToGameChange, completeGameChange } from "../src/game-change.js";
 import { lobbyStartUpdate } from "../src/lobby.js";
 import { joinRoom } from "../src/rooms.js";
 let env;
@@ -352,4 +353,63 @@ test("readiness survives settings changes and an unready guest blocks atomic sta
   // Gameplay remains writable after readiness resets, and a later match needs Ready again.
   await assertSucceeds(set(ref(g(), "rooms/1/state/phase"), "clue"));
   await assertFails(update(ref(h()), lobbyStartUpdate("rooms/1", config, ["host", "guest"], "next-match")));
+});
+
+test("either player can request a game change and the other agrees before returning together", async () => {
+  for (const requester of ["host", "guest"]) {
+    const state = newGame(DEFAULT_SETTINGS, ["host", "guest"], `vote-${requester}`);
+    await set(ref(g(), "rooms/1/ready/guest"), 1);
+    await set(ref(h(), "rooms/1/state"), state);
+    const requesterDb = requester === "host" ? h() : g();
+    const responder = requester === "host" ? "guest" : "host";
+    const responderDb = requester === "host" ? g() : h();
+    await requestGameChange(requesterDb, "rooms/1", state.id, requester);
+    const request = (await get(ref(responderDb, "rooms/1/gameChange"))).val();
+    await assert.rejects(respondToGameChange(requesterDb, "rooms/1", request, requester, true), /other player/);
+    await assertFails(set(ref(requesterDb, "rooms/1/gameChange/accepted"), true));
+    await assertFails(completeGameChange(h(), "rooms/1", request));
+    await respondToGameChange(responderDb, "rooms/1", request, responder, true);
+    const accepted = (await get(ref(h(), "rooms/1/gameChange"))).val();
+    await assertFails(completeGameChange(g(), "rooms/1", accepted));
+    await assertSucceeds(completeGameChange(h(), "rooms/1", accepted));
+    for (const client of [h(), g()]) {
+      assert.equal((await get(ref(client, "rooms/1/state"))).val(), null);
+      assert.equal((await get(ref(client, "rooms/1/ready"))).val(), null);
+      assert.equal((await get(ref(client, "rooms/1/meta/code"))).val(), "1ABCDEFG");
+      assert.equal((await get(ref(client, "rooms/1/settings/game"))).val(), "wheel");
+    }
+  }
+});
+test("declining and cancelling keep the match; stale requests cannot end a newer game", async () => {
+  const state = newGame(DEFAULT_SETTINGS, ["host", "guest"], "original-game");
+  await set(ref(h(), "rooms/1/state"), state);
+  await requestGameChange(g(), "rooms/1", state.id, "guest");
+  const first = (await get(ref(h(), "rooms/1/gameChange"))).val();
+  await respondToGameChange(h(), "rooms/1", first, "host", false);
+  assert.equal((await get(ref(g(), "rooms/1/state/id"))).val(), state.id);
+  await requestGameChange(g(), "rooms/1", state.id, "guest");
+  const second = (await get(ref(g(), "rooms/1/gameChange"))).val();
+  await assert.rejects(respondToGameChange(h(), "rooms/1", first, "host", true), /request has changed/);
+  await respondToGameChange(g(), "rooms/1", second, "guest", false);
+  assert.equal((await get(ref(h(), "rooms/1/state/id"))).val(), state.id);
+  await requestGameChange(h(), "rooms/1", state.id, "host");
+  const third = (await get(ref(g(), "rooms/1/gameChange"))).val();
+  await respondToGameChange(g(), "rooms/1", third, "guest", true);
+  const approved = (await get(ref(h(), "rooms/1/gameChange"))).val();
+  await completeGameChange(h(), "rooms/1", approved);
+  await set(ref(g(), "rooms/1/ready/guest"), 1);
+  await update(ref(h()), lobbyStartUpdate("rooms/1", DEFAULT_SETTINGS, ["host", "guest"], "new-game"));
+  await assertFails(completeGameChange(h(), "rooms/1", approved));
+  assert.equal((await get(ref(g(), "rooms/1/state/id"))).val(), "new-game");
+});
+test("change-game requests cannot be forged by outsiders or tied to another match", async () => {
+  const state = newGame(DEFAULT_SETTINGS, ["host", "guest"], "private-vote");
+  await set(ref(h(), "rooms/1/state"), state);
+  await assertFails(requestGameChange(outsider(), "rooms/1", state.id, "stranger"));
+  await assertFails(requestGameChange(g(), "rooms/1", state.id, "host"));
+  await assertFails(requestGameChange(g(), "rooms/1", "wrong-game", "guest"));
+  await requestGameChange(g(), "rooms/1", state.id, "guest");
+  await assertFails(get(ref(outsider(), "rooms/1/gameChange")));
+  await assertFails(set(ref(g(), "rooms/1/gameChange/extra"), "unbounded"));
+  await assert.rejects(requestGameChange(h(), "rooms/1", state.id, "host"), /already a change-game request/);
 });

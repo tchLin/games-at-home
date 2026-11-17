@@ -1846,3 +1846,8 @@ footer span {
 @media (max-width: 600px) {
   .sound-toggle > span { display: none; }
 }
+.game-change-controls { display: flex; align-items: center; gap: 14px; margin: 16px 0; flex-wrap: wrap; }
+.game-change-controls small { color: var(--muted); font-size: 12px; }
+.game-change-request { background: #f3ebdc; border: 1px solid #d9c9af; border-radius: 12px; padding: 20px; margin: 18px 0; }
+.game-change-request h2 { font-size: 24px; margin: 0 0 8px; }
+.game-change-request p { font-size: 14px; line-height: 1.6; }

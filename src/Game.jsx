@@ -127,16 +127,7 @@ export default function Game(props) {
             ))}
           </div>
           {s.game === "chain" && <ChainAnswers s={s} uid={uid} secret={mine} name={props.name} />}
-          {isHost ? (
-            <Button
-              onClick={() => act(() => set(ref(db, `${base}/state`), null))}
-            >
-              What shall we play next?
-              <ArrowRight size={17} />
-            </Button>
-          ) : (
-            <Notice>Your host can choose the next game.</Notice>
-          )}
+          <Notice>Use “Change game” above to choose the next game together.</Notice>
         </div>
       ) : (
         <div className="game-stage" key={`${s.id}-${s.round}`}>

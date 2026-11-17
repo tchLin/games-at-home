@@ -12,6 +12,7 @@ import {
   roomPath,
   slotOf,
 } from "./firebase.js";
+import { completeGameChange } from "./game-change.js";
 import { resolve, other, deadline, revealChain } from "./engine.js";
 export function useRoom(code, uid, onError) {
   const [room, setRoom] = useState({});
@@ -30,6 +31,7 @@ export function useRoom(code, uid, onError) {
       "players",
       "ready",
       "presence",
+      "gameChange",
     ].map((key) =>
       onValue(
         ref(db, `${base}/${key}`),
@@ -86,6 +88,11 @@ export function useRoom(code, uid, onError) {
     },
     [base],
   );
+  useEffect(() => {
+    const request = room.gameChange;
+    if (!isHost || !valid || !connected || !request?.accepted || request.completed || request.gameId !== room.state?.id) return;
+    completeGameChange(db, base, request).catch(onError);
+  }, [room.gameChange, room.state?.id, isHost, valid, connected, base]);
   // A one-day lease frees abandoned public seats; an active host refreshes it.
   useEffect(() => {
     if (!isHost || !valid || !connected) return;

@@ -101,6 +101,7 @@ export async function createRoom(uid, name, reserved = false, game = "wheel") {
       [`${base}/players`]: { [uid]: { name } },
       [`${base}/ready`]: { [uid]: 1 },
       [`${base}/state`]: null,
+      [`${base}/gameChange`]: null,
       [`${base}/presence`]: null,
       [`secrets/${slot}`]: null,
     });

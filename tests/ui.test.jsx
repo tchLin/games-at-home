@@ -8,6 +8,8 @@ import {
   waitFor,
   cleanup,
   within,
+  renderHook,
+  act as reactAct,
 } from "@testing-library/react";
 vi.mock("../src/firebase.js", () => ({
   identity: vi.fn(async () => null),
@@ -35,9 +37,12 @@ vi.mock("../src/firebase.js", () => ({
 }));
 import App, { Lobby } from "../src/App.jsx";
 import Game from "../src/Game.jsx";
+import { GameChangeControls } from "../src/GameChangeControls.jsx";
+import { useRoom } from "../src/useRoom.js";
+import * as gameChangeActions from "../src/game-change.js";
 import { newGame, chainMasks } from "../src/engine.js";
 import { DEFAULT_SETTINGS } from "../src/content.js";
-import { set, identity, guestLogin, createRoom, joinRoom, login, update } from "../src/firebase.js";
+import { set, identity, guestLogin, createRoom, joinRoom, login, update, onValue, presence } from "../src/firebase.js";
 beforeEach(() => {
   identity.mockResolvedValue(null);
   createRoom.mockResolvedValue("1ABCDEFG");
@@ -338,4 +343,63 @@ describe("flexible lobby readiness", () => {
     rerender(<Lobby {...base} uid="host" isHost room={{ ...room, ready: { guest: 1 } }} settings={DEFAULT_SETTINGS} bothOnline={false} />);
     expect(screen.getByRole("button", { name: /Waiting for both/ }).disabled).toBe(true);
   });
+});
+
+describe("shared game-change request controls", () => {
+  const base = { gameId: "match", uid: "host", connected: true, hostOnline: true, name: (uid) => uid === "host" ? "Alex" : "Sam", onRequest: vi.fn(), onRespond: vi.fn() };
+  const request = { gameId: "match", requestId: "request", requestedBy: "host", accepted: false, completed: false };
+  it("lets either player ask and only offers cancellation to the requester", () => {
+    const { rerender } = render(<GameChangeControls {...base} />);
+    fireEvent.click(screen.getByRole("button", { name: "Change game" }));
+    expect(base.onRequest).toHaveBeenCalledOnce();
+    rerender(<GameChangeControls {...base} request={request} />);
+    expect(screen.queryByRole("button", { name: /Agree/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel request" }));
+    expect(base.onRespond).toHaveBeenCalledWith(false);
+  });
+  it("offers the other player both agreement and keep-playing choices", () => {
+    render(<GameChangeControls {...base} uid="guest" request={request} />);
+    expect(screen.getByText("Alex wants to change games.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Agree · change game" }));
+    expect(base.onRespond).toHaveBeenCalledWith(true);
+    fireEvent.click(screen.getByRole("button", { name: "Keep playing" }));
+    expect(base.onRespond).toHaveBeenCalledWith(false);
+  });
+  it("explains an accepted request while waiting for an offline host and ignores old requests", () => {
+    const { rerender } = render(<GameChangeControls {...base} uid="guest" hostOnline={false} request={{ ...request, accepted: true }} />);
+    expect(screen.getByText(/Waiting for the host to reconnect/)).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
+    rerender(<GameChangeControls {...base} request={{ ...request, gameId: "old-match" }} />);
+    expect(screen.getByRole("button", { name: "Change game" })).toBeTruthy();
+  });
+});
+
+it("the host automatically completes an accepted request and receives the lobby state", async () => {
+  const listeners = new Map();
+  const completion = vi.spyOn(gameChangeActions, "completeGameChange").mockResolvedValue();
+  onValue.mockImplementation((path, callback) => { listeners.set(path, callback); return () => {}; });
+  presence.mockImplementation((code, uid, callback) => { callback(true); return () => {}; });
+  try {
+    const { result, unmount } = renderHook(() => useRoom("1ABCDEFG", "host", vi.fn()));
+    const state = newGame(DEFAULT_SETTINGS, ["host", "guest"], "hook-match");
+    const request = { gameId: state.id, requestId: "hook-request", requestedBy: "guest", accepted: false, completed: false };
+    reactAct(() => {
+      listeners.get("rooms/1/meta")({ val: () => ({ host: "host", guest: "guest", code: "1ABCDEFG", open: true, leaseEnd: Date.now() + 60000 }) });
+      listeners.get("rooms/1/presence")({ val: () => ({ host: { 0: true }, guest: { 0: true } }) });
+      listeners.get("rooms/1/state")({ val: () => state });
+      listeners.get("rooms/1/gameChange")({ val: () => request });
+    });
+    expect(completion).not.toHaveBeenCalled();
+    const accepted = { ...request, accepted: true };
+    reactAct(() => listeners.get("rooms/1/gameChange")({ val: () => accepted }));
+    await waitFor(() => expect(completion).toHaveBeenCalledWith({}, "rooms/1", accepted));
+    reactAct(() => listeners.get("rooms/1/state")({ val: () => null }));
+    expect(result.current.room.state).toBeNull();
+    expect(completion).toHaveBeenCalledOnce();
+    unmount();
+  } finally {
+    completion.mockRestore();
+    onValue.mockImplementation(() => () => {});
+    presence.mockImplementation(() => () => {});
+  }
 });
