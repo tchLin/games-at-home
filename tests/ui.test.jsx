@@ -37,7 +37,7 @@ import App, { Lobby } from "../src/App.jsx";
 import Game from "../src/Game.jsx";
 import { newGame, chainMasks } from "../src/engine.js";
 import { DEFAULT_SETTINGS } from "../src/content.js";
-import { set, identity, guestLogin, createRoom, joinRoom, login } from "../src/firebase.js";
+import { set, identity, guestLogin, createRoom, joinRoom, login, update } from "../src/firebase.js";
 beforeEach(() => {
   identity.mockResolvedValue(null);
   createRoom.mockResolvedValue("1ABCDEFG");
@@ -303,5 +303,39 @@ describe("game review and readable round information", () => {
     expect(screen.queryByLabelText("Hint 3 · one word only")).toBeNull();
     expect(screen.getByLabelText("Guesses so far")).toBeTruthy();
     expect(screen.queryByText("coffee")).toBeNull();
+  });
+});
+
+describe("flexible lobby readiness", () => {
+  const room = { meta: { host: "host", guest: "guest" }, ready: {} };
+  const base = { room, uid: "guest", isHost: false, base: "rooms/1", act: async (fn) => fn(), bothOnline: true };
+  it("lets the guest toggle ready before settings are final and stay ready after changes", async () => {
+    const { rerender } = render(<Lobby {...base} settings={DEFAULT_SETTINGS} />);
+    fireEvent.click(screen.getByRole("button", { name: "I’m ready" }));
+    await waitFor(() => expect(set).toHaveBeenCalledWith("rooms/1/ready/guest", 1));
+    rerender(<Lobby {...base} room={{ ...room, ready: { guest: 1 } }} settings={{ ...DEFAULT_SETTINGS, version: 12, rounds: 8 }} />);
+    const unready = screen.getByRole("button", { name: "Unready" });
+    expect(unready.disabled).toBe(false);
+    fireEvent.click(unready);
+    await waitFor(() => expect(set).toHaveBeenCalledWith("rooms/1/ready/guest", 0));
+  });
+  it("lets the host start with unsaved changes and saves that exact configuration", async () => {
+    render(<Lobby {...base} uid="host" isHost room={{ ...room, ready: { guest: 1 } }} settings={DEFAULT_SETTINGS} />);
+    fireEvent.change(screen.getByLabelText("Rounds"), { target: { value: "12" } });
+    const start = screen.getByRole("button", { name: "Start game" });
+    expect(start.disabled).toBe(false);
+    fireEvent.click(start);
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    const payload = update.mock.calls[0][1];
+    expect(payload["rooms/1/settings"].rounds).toBe(12);
+    expect(payload["rooms/1/state"].config.rounds).toBe(12);
+    expect(payload["rooms/1/settings"].version).toBe(2);
+    expect(payload["rooms/1/ready"]).toBeNull();
+  });
+  it("prevents Start while the guest is unready or disconnected", () => {
+    const { rerender } = render(<Lobby {...base} uid="host" isHost settings={DEFAULT_SETTINGS} />);
+    expect(screen.getByRole("button", { name: /Waiting for guest/ }).disabled).toBe(true);
+    rerender(<Lobby {...base} uid="host" isHost room={{ ...room, ready: { guest: 1 } }} settings={DEFAULT_SETTINGS} bothOnline={false} />);
+    expect(screen.getByRole("button", { name: /Waiting for both/ }).disabled).toBe(true);
   });
 });

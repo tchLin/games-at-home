@@ -38,9 +38,10 @@ const config = {
   version: num(1, 1e15),
   $other: { ".validate": false },
 };
+const guestReady = `root.child('rooms').child($slot).child('ready').child(${meta}.child('guest').val()).isNumber() && root.child('rooms').child($slot).child('ready').child(${meta}.child('guest').val()).val() > 0`;
 const state = {
   ".read": read,
-  ".write": `${write} && (${host} || (data.exists() && newData.child('id').val() === data.child('id').val() && newData.child('game').val() === data.child('game').val() && newData.child('round').val() === data.child('round').val()))`,
+  ".write": `${write} && ((${host} && (!newData.exists() || (data.exists() && newData.child('id').val() === data.child('id').val()) || (${guestReady}))) || (data.exists() && newData.child('id').val() === data.child('id').val() && newData.child('game').val() === data.child('game').val() && newData.child('round').val() === data.child('round').val()))`,
   ".validate":
     "newData.hasChildren(['id','game','phase','config','round','players','scores','revision']) && newData.numChildren() <= 25",
   id: str(50),
@@ -199,7 +200,7 @@ const rules = {
         ".read": read,
         ".write": `${write} && ${host}`,
         ".validate": "newData.numChildren() <= 2",
-        $uid: { ".write": `${write} && auth.uid === $uid`, ...num(1, 1e15) },
+        $uid: { ".write": `${write} && auth.uid === $uid`, ...num(0, 1e15) },
       },
       presence: {
         ".read": read,

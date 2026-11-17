@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Check,
@@ -17,6 +17,7 @@ import { other, deadline, nextRound, chainMasks, normalize } from "./engine.js";
 import { Dial } from "./art.jsx";
 import { spinTarget } from "./wheel.js";
 import { wordSuggestions } from "./word-links.js";
+import { playGameSound } from "./sound.js";
 import { Button, Field, Tag, Notice } from "./App.jsx";
 export default function Game(props) {
   const {
@@ -33,6 +34,22 @@ export default function Game(props) {
     base,
   } = props;
   const s = room.state;
+  const previousState = useRef(null);
+  useEffect(() => {
+    const before = previousState.current;
+    previousState.current = s;
+    if (!before || before.id !== s.id) {
+      if (["prepare", "setup"].includes(s.phase)) playGameSound("start");
+      return;
+    }
+    if (s.phase === "finished" && before.phase !== "finished") playGameSound("finish");
+    else if (s.phase === "reveal" && before.phase !== "reveal") playGameSound(s.result?.points ? "success" : "reveal");
+    else if (s.players.some((player) => s.scores[player] > before.scores[player])) playGameSound("success");
+    else if (s.game === "wheel" && before.phase === "prepare" && s.phase === "clue") playGameSound("spin");
+    else if (s.phase === "guess" && (before.phase !== "guess" || before.turn !== s.turn) &&
+      (s.game === "chain" ? s.turn === uid : s.giver !== uid)) playGameSound("turn");
+    else if (s.phase === "hint" && before.phase !== "hint" && s.giver === uid) playGameSound("turn");
+  }, [s, uid]);
   const mine =
     secret?.gameId === s.id && secret.round === s.round ? secret : null;
   const disabled = busy || !bothOnline || !connected || Boolean(s.pausedAt);

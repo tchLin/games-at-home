@@ -34,7 +34,10 @@ import {
 } from "./firebase.js";
 import { GAMES, DEFAULT_SETTINGS, WORDS, WHEEL_TOPICS } from "./content.js";
 import { GameArt } from "./art.jsx";
-import { newGame } from "./engine.js";
+import { lobbyStartUpdate } from "./lobby.js";
+import { isPermissionDenied } from "./rooms.js";
+import { SoundControls } from "./SoundControls.jsx";
+import { soundInteraction } from "./sound.js";
 import { useRoom } from "./useRoom.js";
 import Game from "./Game.jsx";
 const saved = () => {
@@ -196,7 +199,7 @@ export default function App() {
   };
   return (
     <>
-      <div className="page-shell">
+      <div className="page-shell" onClickCapture={soundInteraction} onSubmitCapture={soundInteraction}>
         <header className="site-header">
           <Brand
             onClick={() => {
@@ -206,6 +209,7 @@ export default function App() {
           <span className="header-note">
             <Heart size={14} /> a little closer, wherever you are
           </span>
+          <SoundControls />
           {!code && user && !user.isAnonymous && (
             <button
               className="text-button"
@@ -696,28 +700,30 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
   useEffect(() => setDraft(settings), [settings.version]);
   const change = (key, value) => setDraft((d) => ({ ...d, [key]: value }));
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
-  const reviewed = room.ready?.[uid] === settings.version;
+  const ready = (room.ready?.[uid] || 0) > 0;
   const guestReady =
-    room.meta.guest && room.ready?.[room.meta.guest] === settings.version;
+    room.meta.guest && (room.ready?.[room.meta.guest] || 0) > 0;
   const save = () =>
     act(async () => {
       const version = settings.version + 1;
       await update(ref(db), {
         [`${base}/settings`]: { ...draft, version },
-        [`${base}/ready/${uid}`]: version,
       });
     });
   const start = () =>
-    act(() =>
-      set(
-        ref(db, `${base}/state`),
-        newGame(
-          settings,
+    act(async () => {
+      try {
+        await update(ref(db), lobbyStartUpdate(
+          base,
+          { ...draft, version: dirty ? settings.version + 1 : settings.version },
           [room.meta.host, room.meta.guest],
           crypto.randomUUID(),
-        ),
-      ),
-    );
+        ));
+      } catch (error) {
+        if (isPermissionDenied(error)) throw Error("Couldn’t start. Check that your room is open and your guest is still ready, then try again.");
+        throw error;
+      }
+    });
   const cfg = isHost ? draft : settings;
   return (
     <>
@@ -728,8 +734,8 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
         <h1>A good evening starts here.</h1>
         <p>
           {isHost
-            ? "Pick a game and set the mood. Your person can review everything before you begin."
-            : "Your host is setting things up. Review the settings, then let them know you’re ready."}
+            ? "Pick a game and set the mood. Start when your person is ready; your latest settings save automatically."
+            : "You can get ready while your host sets things up, or unready at any time before they start."}
         </p>
       </div>
       <div className="lobby-layout">
@@ -853,48 +859,26 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
             </small>
           </div>
           {isHost ? (
-            dirty ? (
-              <Button
-                onClick={save}
-                disabled={busy || !draft.left.trim() || !draft.right.trim()}
-              >
-                Save settings for review
-                <Check size={17} />
-              </Button>
-            ) : (
-              <Button
-                onClick={start}
-                disabled={busy || !guestReady || !bothOnline}
-              >
-                {!room.meta.guest
-                  ? "Waiting for your person…"
-                  : !guestReady
-                    ? "Waiting for their ready…"
-                    : !bothOnline
-                      ? "Waiting for both players…"
-                      : "Let’s play"}
+            <div className="form-buttons">
+              {dirty && <Button secondary onClick={save} disabled={busy || !draft.left.trim() || !draft.right.trim()}>
+                Save settings <Check size={17} />
+              </Button>}
+              <Button onClick={start} disabled={busy || !guestReady || !bothOnline || !draft.left.trim() || !draft.right.trim()}>
+                {!room.meta.guest ? "Waiting for your person…"
+                  : !guestReady ? "Waiting for guest to be ready…"
+                  : !bothOnline ? "Waiting for both players…" : "Start game"}
                 <ArrowRight size={18} />
               </Button>
-            )
+            </div>
           ) : (
-            <Button
-              onClick={() =>
-                act(() =>
-                  set(ref(db, `${base}/ready/${uid}`), settings.version),
-                )
-              }
-              disabled={busy || reviewed}
-            >
-              {reviewed ? "Ready when you are" : "These look good · I’m ready"}
-              <Check size={17} />
+            <Button onClick={() => act(() => set(ref(db, `${base}/ready/${uid}`), ready ? 0 : 1))}
+              disabled={busy} secondary={ready} aria-pressed={ready}>
+              {ready ? "Unready" : "I’m ready"}<Check size={17} />
             </Button>
           )}
           <p className="entry-footnote">
-            {dirty
-              ? "Save your changes so your person can review them."
-              : guestReady
-                ? "Settings reviewed. You’re all set."
-                : "Both players see the settings before the game starts."}
+            {isHost ? guestReady ? "Guest is ready. Start with the settings above whenever you are." : "Your guest can get ready while you choose the settings."
+              : ready ? "You’re ready. Your host can keep adjusting settings, then start." : "Ready is independent of settings. You can change your mind before the game starts."}
           </p>
         </section>
       </div>

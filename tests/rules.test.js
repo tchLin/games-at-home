@@ -17,6 +17,7 @@ import {
 } from "firebase/database";
 import { newGame, resolve, maskWord, chainMasks, revealChain } from "../src/engine.js";
 import { DEFAULT_SETTINGS } from "../src/content.js";
+import { lobbyStartUpdate } from "../src/lobby.js";
 import { joinRoom } from "../src/rooms.js";
 let env;
 const token = (email) => ({
@@ -48,6 +49,7 @@ async function seed() {
         1: {
           meta: { ...meta(), guest: "guest" },
           settings: DEFAULT_SETTINGS,
+          ready: { host: 1, guest: 1 },
           players: { host: { name: "Host" }, guest: { name: "Guest" } },
         },
       },
@@ -334,4 +336,20 @@ test("chain guesses sync per word and full answers are shared only at game end",
   assert.deepEqual((await get(ref(h(), "rooms/1/state/boards/guest/answers"))).val(), guestSecret.words);
   assert.deepEqual((await get(ref(g(), "rooms/1/state/boards/host/answers"))).val(), hostSecret.words);
   await assertFails(get(ref(outsider(), "rooms/1/state")));
+});
+
+test("readiness survives settings changes and an unready guest blocks atomic start", async () => {
+  await assertSucceeds(set(ref(g(), "rooms/1/ready/guest"), 0));
+  const config = { ...DEFAULT_SETTINGS, version: 4, rounds: 12 };
+  await assertFails(update(ref(h()), lobbyStartUpdate("rooms/1", config, ["host", "guest"], "ready-match")));
+  assert.equal((await get(ref(h(), "rooms/1/settings/version"))).val(), 1);
+  await set(ref(g(), "rooms/1/ready/guest"), 1);
+  await set(ref(h(), "rooms/1/settings"), { ...DEFAULT_SETTINGS, version: 3 });
+  assert.equal((await get(ref(h(), "rooms/1/ready/guest"))).val(), 1);
+  await assertSucceeds(update(ref(h()), lobbyStartUpdate("rooms/1", config, ["host", "guest"], "ready-match")));
+  assert.equal((await get(ref(g(), "rooms/1/state/config/rounds"))).val(), 12);
+  assert.equal((await get(ref(g(), "rooms/1/ready"))).val(), null);
+  // Gameplay remains writable after readiness resets, and a later match needs Ready again.
+  await assertSucceeds(set(ref(g(), "rooms/1/state/phase"), "clue"));
+  await assertFails(update(ref(h()), lobbyStartUpdate("rooms/1", config, ["host", "guest"], "next-match")));
 });

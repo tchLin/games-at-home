@@ -1810,17 +1810,14 @@ footer span {
 .wheel-clue {
   max-width: 600px;
   margin: 18px auto;
-  padding: 20px 24px;
+  padding: 4px 0;
   text-align: center;
-  background: #f7e5d7;
-  border: 2px solid #ce9c7e;
-  border-radius: 16px;
 }
 .wheel-clue > span { display: block; font-size: 11px; letter-spacing: .15em; color: #80523c; }
-.wheel-clue > strong { display: block; margin-top: 8px; font-size: clamp(28px, 6vw, 46px); line-height: 1.15; color: #703c27; overflow-wrap: anywhere; }
+.wheel-clue > strong { display: block; margin-top: 8px; font-size: clamp(28px, 5vw, 38px); line-height: 1.15; color: #703c27; overflow-wrap: anywhere; }
 .scale-labels { gap: 12px; font-size: clamp(17px, 3.5vw, 23px); font-weight: 700; line-height: 1.25; }
-.scale-labels > span { flex: 1; max-width: none; padding: 13px 12px; border-radius: 10px; background: #f3ddcb; color: #703c27; border: 1px solid #d9b49a; }
-.scale-labels > span:last-child { background: #e4ebd8; color: #3c5431; border-color: #b6c5a4; }
+.scale-labels > span { flex: 1; max-width: none; padding: 4px 0; color: #703c27; }
+.scale-labels > span:last-child { color: #3c5431; }
 .word-rows .word-row { width: 100%; }
 .word-guess-trail { margin: 5px 0 10px; text-align: left; font-size: 12px; color: #655a4b; }
 .word-guess-trail > summary { cursor: pointer; padding: 10px 4px; min-height: 38px; }
@@ -1844,3 +1841,8 @@ footer span {
 .clue-history ol { padding-left: 22px; }
 .clue-history li { padding: 6px 0; overflow-wrap: anywhere; }
 .clue-history li strong { font-size: 11px; color: #6f755b; margin-left: 12px; white-space: nowrap; }
+
+.sound-toggle { flex-shrink: 0; min-height: 44px; }
+@media (max-width: 600px) {
+  .sound-toggle > span { display: none; }
+}
