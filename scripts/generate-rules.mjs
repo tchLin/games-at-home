@@ -1,11 +1,12 @@
 import { writeFileSync } from "node:fs";
 const signed =
   "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com'";
+const player = `auth != null && (auth.token.firebase.sign_in_provider === 'anonymous' || (${signed}))`;
 const priority =
-  "root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true";
+  `(${signed} && root.child('priority').child(auth.token.email.toLowerCase().replace('.', '%2E')).val() === true)`;
 const slot =
   "($slot === '0' || $slot === '1' || $slot === '2' || $slot === '3' || $slot === '4')";
-const allowed = `${signed} && ${slot} && ($slot !== '0' || ${priority})`;
+const allowed = `${player} && ${slot} && ($slot !== '0' || ${priority})`;
 const meta = "root.child('rooms').child($slot).child('meta')";
 const host = `${meta}.child('host').val() === auth.uid`;
 const member = `(${host} || ${meta}.child('guest').val() === auth.uid)`;

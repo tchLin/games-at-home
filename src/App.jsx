@@ -17,6 +17,7 @@ import {
 import {
   identity,
   login,
+  guestLogin,
   logout,
   priorityAccess,
   createRoom,
@@ -111,6 +112,7 @@ export default function App() {
   const [reservedCode, setReservedCode] = useState("");
   const report = (e) => setError(friendlyError(e));
   async function establish(u) {
+    setReservedCode("");
     if (u && !u.isAnonymous) {
       connect();
       try {
@@ -136,7 +138,7 @@ export default function App() {
       });
   }, []);
   useEffect(() => {
-    if (!user || user.isAnonymous) return;
+    if (!user || code) return;
     const stored = saved(),
       incoming = new URLSearchParams(location.search).get("room");
     if (stored?.uid === user.uid && (!incoming || incoming === stored.code)) {
@@ -159,14 +161,24 @@ export default function App() {
   };
   const enter = async (mode, name, input, reserved, game) =>
     act(async () => {
+      if (mode === "join" && input.trim().startsWith("0") && !priority) {
+        throw Error(
+          "This is a reserved room. Use Google sign-in with one of the two approved accounts.",
+        );
+      }
+      const player = user || (await guestLogin());
+      if (!user) {
+        setUser(player);
+        setPriority(false);
+      }
       connect();
       try {
         const value =
           mode === "create"
-            ? await createRoom(user.uid, name, reserved, game)
+            ? await createRoom(player.uid, name, reserved && priority, game)
             : input.trim().toUpperCase();
-        if (mode === "join") await joinRoom(value, user.uid, name);
-        const data = { code: value, name, uid: user.uid };
+        if (mode === "join") await joinRoom(value, player.uid, name);
+        const data = { code: value, name, uid: player.uid };
         remember(data);
         setLast(data);
         setCode(value);
@@ -202,6 +214,7 @@ export default function App() {
                   await logout();
                   setUser(null);
                   setPriority(false);
+                  setReservedCode("");
                 })
               }
             >
@@ -229,7 +242,7 @@ export default function App() {
           />
         ) : (
           <Home
-            user={user?.isAnonymous ? null : user}
+            user={user}
             ready={authReady}
             priority={priority}
             reservedCode={reservedCode}
@@ -329,8 +342,7 @@ function Home({
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (user)
-                onEnter(mode, name.trim(), input, priority && reserved, game);
+              onEnter(mode, name.trim(), input, priority && reserved, game);
             }}
           >
             <Field label="What should we call you?">
@@ -374,27 +386,35 @@ function Home({
                 <ShieldCheck size={18} />
               </label>
             )}
-            {user ? (
-              <Button type="submit" disabled={busy || !name.trim()}>
-                {busy
-                  ? "Getting your room ready…"
-                  : mode === "create"
-                    ? "Make room for two"
+            <Button type="submit" disabled={!ready || busy || !name.trim()}>
+              {busy
+                ? "Getting your room ready…"
+                : mode === "create"
+                  ? !user || user.isAnonymous
+                    ? "Create room as guest"
+                    : "Make room for two"
+                  : !user || user.isAnonymous
+                    ? "Join room as guest"
                     : "Join your person"}
-                <ArrowRight size={18} />
-              </Button>
-            ) : (
-              <Button type="button" onClick={onLogin} disabled={!ready || busy}>
+              <ArrowRight size={18} />
+            </Button>
+            {(!user || user.isAnonymous) && (
+              <Button
+                secondary
+                type="button"
+                onClick={onLogin}
+                disabled={!ready || busy}
+                className="google-entry"
+              >
                 <span className="google-g">G</span>
-                {busy ? "Opening sign-in…" : "Continue with Google"}
-                <ArrowRight size={17} />
+                Google sign-in for reserved access
               </Button>
             )}
             <p className="entry-footnote">
               <ShieldCheck size={13} />
-              {user
+              {user && !user.isAnonymous
                 ? "Private room codes. No downloads. No fuss."
-                : "Sign in once. Find your seat on any device."}
+                : "No signup needed. Guests rejoin in the same browser."}
             </p>
           </form>
           {user && (reservedCode || last?.uid === user.uid) && (
@@ -482,7 +502,7 @@ function Home({
       <details className="public-info">
         <summary>How public rooms and privacy work</summary>
         <p>
-          Four public rooms hold two signed-in players each. One additional room
+          Four public rooms hold two players each, with no signup required. One additional room
           is reserved for the owners. A room code is an invitation: share it
           only with the person you want to play with. Your Google email is not
           shown to other players. Secret words stay private until the game
@@ -653,7 +673,9 @@ function Room({ code, user, onHome, report, act, busy }) {
             <p>
               {isHost
                 ? "Ending the room closes it for both players. You can create a new room whenever you like."
-                : "Your seat and progress are saved. Sign in with the same Google account and use this room code to rejoin."}
+                : user.isAnonymous
+                  ? "Your seat and progress are saved. Use this room code in the same browser to rejoin. Clearing browser data or changing your sign-in loses your guest seat."
+                  : "Your seat and progress are saved. Sign in with the same Google account and use this room code to rejoin."}
             </p>
             <div className="modal-buttons">
               <Button secondary onClick={() => setLeaving(false)}>

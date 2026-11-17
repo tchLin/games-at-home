@@ -1781,3 +1781,7 @@ footer span {
     display: none;
   }
 }
+
+.entry-card .google-entry {
+  margin-top: 10px;
+}

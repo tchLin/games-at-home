@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { afterEach, describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
   render,
   screen,
@@ -11,10 +11,11 @@ import {
 vi.mock("../src/firebase.js", () => ({
   identity: vi.fn(async () => null),
   login: vi.fn(),
+  guestLogin: vi.fn(async () => ({ uid: "anonymous-player", isAnonymous: true })),
   logout: vi.fn(),
   priorityAccess: vi.fn(async () => false),
   createRoom: vi.fn(),
-  joinRoom: vi.fn(),
+  joinRoom: vi.fn(async () => {}),
   friendlyError: (e) => e.message,
   db: {},
   connect: vi.fn(),
@@ -35,11 +36,16 @@ import App from "../src/App.jsx";
 import Game from "../src/Game.jsx";
 import { newGame } from "../src/engine.js";
 import { DEFAULT_SETTINGS } from "../src/content.js";
-import { set } from "../src/firebase.js";
+import { set, identity, guestLogin, createRoom, joinRoom, login } from "../src/firebase.js";
+beforeEach(() => {
+  identity.mockResolvedValue(null);
+  createRoom.mockResolvedValue("1ABCDEFG");
+});
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   localStorage.clear();
+  history.replaceState({}, "", "/");
 });
 const props = (game, overrides = {}) => ({
   room: {
@@ -64,18 +70,60 @@ const props = (game, overrides = {}) => ({
   ...overrides,
 });
 describe("cozy home and game forms", () => {
-  it("shows the three games and requires sign-in before room creation", async () => {
+  it("shows the three games with guest play and optional Google sign-in", async () => {
     render(<App />);
     expect(screen.getByRole("heading", { name: /Good company/ })).toBeTruthy();
     for (const name of ["Blind Wheel", "Word by Word", "Three Little Clues"])
       expect(screen.getByRole("heading", { name })).toBeTruthy();
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: /Continue with Google/ }).disabled,
+        screen.getByRole("button", { name: /Google sign-in for reserved access/ }).disabled,
       ).toBe(false),
     );
     fireEvent.click(screen.getByRole("button", { name: "Join a room" }));
     expect(screen.getByLabelText("Room code")).toBeTruthy();
+  });
+  it("creates a public room with an anonymous identity and no Google popup", async () => {
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("What should we call you?"), { target: { value: "Alex" } });
+    const button = screen.getByRole("button", { name: /Create room as guest/ });
+    await waitFor(() => expect(button.disabled).toBe(false));
+    fireEvent.click(button);
+    await waitFor(() => expect(createRoom).toHaveBeenCalledWith("anonymous-player", "Alex", false, "wheel"));
+    expect(guestLogin).toHaveBeenCalledOnce();
+    expect(login).not.toHaveBeenCalled();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("gah-room")).uid).toBe("anonymous-player"));
+  });
+  it("joins a public invitation as a guest", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Join a room" }));
+    fireEvent.change(screen.getByLabelText("What should we call you?"), { target: { value: "Sam" } });
+    fireEvent.change(screen.getByLabelText("Room code"), { target: { value: "1ABCDEFG" } });
+    const button = screen.getByRole("button", { name: /Join room as guest/ });
+    await waitFor(() => expect(button.disabled).toBe(false));
+    fireEvent.click(button);
+    await waitFor(() => expect(joinRoom).toHaveBeenCalledWith("1ABCDEFG", "anonymous-player", "Sam"));
+    expect(login).not.toHaveBeenCalled();
+  });
+  it("restores a guest seat using the persisted browser identity", async () => {
+    identity.mockResolvedValue({ uid: "returning-guest", isAnonymous: true });
+    localStorage.setItem("gah-room", JSON.stringify({ uid: "returning-guest", name: "Sam", code: "1ABCDEFG" }));
+    render(<App />);
+    await waitFor(() => expect(joinRoom).toHaveBeenCalledWith("1ABCDEFG", "returning-guest", "Sam"));
+    expect(guestLogin).not.toHaveBeenCalled();
+    expect(login).not.toHaveBeenCalled();
+  });
+  it("directs reserved invitations to Google sign-in without creating a guest identity", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Join a room" }));
+    fireEvent.change(screen.getByLabelText("What should we call you?"), { target: { value: "Sam" } });
+    fireEvent.change(screen.getByLabelText("Room code"), { target: { value: "0ABCDEFG" } });
+    const button = screen.getByRole("button", { name: /Join room as guest/ });
+    await waitFor(() => expect(button.disabled).toBe(false));
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("This is a reserved room"));
+    expect(guestLogin).not.toHaveBeenCalled();
+    expect(joinRoom).not.toHaveBeenCalled();
   });
   it("keeps a wheel target off the guesser screen and submits the chosen position", async () => {
     const p = props("wheel", { uid: "guest", isHost: false });

@@ -3,6 +3,7 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInAnonymously,
   signOut,
   browserLocalPersistence,
   setPersistence,
@@ -47,12 +48,17 @@ export async function identity() {
 export async function login() {
   return (await signInWithPopup(auth, new GoogleAuthProvider())).user;
 }
+export async function guestLogin() {
+  await auth.authStateReady();
+  return auth.currentUser || (await signInAnonymously(auth)).user;
+}
 export async function logout() {
   disconnect();
   await signOut(auth);
 }
 export const emailKey = (email) => email.toLowerCase().replaceAll(".", "%2E");
 export async function priorityAccess(user) {
+  if (user.isAnonymous || !user.email) return false;
   return (
     (await get(ref(db, `priority/${emailKey(user.email)}`))).val() === true
   );
@@ -115,7 +121,7 @@ export async function joinRoom(code, uid, name) {
       await update(ref(db, `${base}/meta`), { guest: uid, joinCode: code });
     } catch {
       throw Error(
-        "That room is full, closed, or the code is incorrect. Check the code and your Google account.",
+        "That room is full, closed, or the code is incorrect. To rejoin, use your original guest browser or Google account.",
       );
     }
     meta = (await get(ref(db, `${base}/meta`))).val();
@@ -129,7 +135,7 @@ export async function joinRoom(code, uid, name) {
   if (meta.host !== uid) {
     if (meta.guest && meta.guest !== uid)
       throw Error(
-        "This room already has two players. To rejoin, sign in with the same Google account.",
+        "This room already has two players. To rejoin as a guest, use the same browser; otherwise use the same Google account.",
       );
     await update(ref(db, `${base}/meta`), { guest: uid, joinCode: code });
   }

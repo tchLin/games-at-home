@@ -25,9 +25,10 @@ const token = (email) => ({
 });
 const context = (uid, email = `${uid}@example.test`) =>
   env.authenticatedContext(uid, token(email)).database();
-const h = () => context("host"),
-  g = () => context("guest"),
-  outsider = () => context("stranger");
+const anonymous = (uid) => env.authenticatedContext(uid, { firebase: { sign_in_provider: "anonymous" } }).database();
+const h = () => anonymous("host"),
+  g = () => anonymous("guest"),
+  outsider = () => anonymous("stranger");
 const meta = (host = "host", slot = "1") => ({
   host,
   code: `${slot}ABCDEFG`,
@@ -72,14 +73,9 @@ beforeEach(async () => {
 after(async () => {
   await env.cleanup();
 });
-test("unauthenticated, anonymous, and unverified accounts cannot read or create rooms", async () => {
+test("unauthenticated and unverified accounts cannot read or create rooms", async () => {
   for (const database of [
     env.unauthenticatedContext().database(),
-    env
-      .authenticatedContext("anon", {
-        firebase: { sign_in_provider: "anonymous" },
-      })
-      .database(),
     env
       .authenticatedContext("unverified", {
         email: "x@example.test",
@@ -92,6 +88,18 @@ test("unauthenticated, anonymous, and unverified accounts cannot read or create 
     await assertFails(set(ref(database, "rooms/2/meta"), meta("anon", "2")));
   }
 });
+test("anonymous and verified Google players can each host and join public rooms", async () => {
+  for (const [slot, hostDb, guestDb] of [["2", h(), g()], ["3", context("host"), context("guest")]]) {
+    await assertSucceeds(set(ref(hostDb, `rooms/${slot}/meta`), meta("host", slot)));
+    await assertSucceeds(update(ref(guestDb, `rooms/${slot}/meta`), { guest: "guest", joinCode: `${slot}ABCDEFG` }));
+    await assertSucceeds(get(ref(guestDb, `rooms/${slot}/meta`)));
+  }
+});
+test("an anonymous identity cannot impersonate a priority email", async () => {
+  const spoof = env.authenticatedContext("owner", { email: "owner@example.test", email_verified: true, firebase: { sign_in_provider: "anonymous" } }).database();
+  await assertFails(set(ref(spoof, "rooms/0/meta"), meta("owner", "0")));
+  await assertFails(get(ref(spoof, "priority/owner@example%2Etest")));
+});
 test("only fixed room slots exist and only priority accounts can use slot zero", async () => {
   await assertFails(set(ref(h(), "rooms/5/meta"), meta("host", "5")));
   await assertFails(set(ref(h(), "rooms/0/meta"), meta("host", "0")));
@@ -102,6 +110,8 @@ test("only fixed room slots exist and only priority accounts can use slot zero",
     ),
   );
   await assertFails(get(ref(outsider(), "rooms/0/meta")));
+  await assertFails(update(ref(outsider(), "rooms/0/meta"), { guest: "stranger", joinCode: "0ABCDEFG" }));
+  await assertFails(set(ref(context("regular"), "rooms/0/meta"), meta("regular", "0")));
   await assertSucceeds(
     update(ref(context("partner", "partner@example.test"), "rooms/0/meta"), {
       guest: "partner",
@@ -202,7 +212,7 @@ test("word-list preparation can commit concurrently without losing either list",
   await set(ref(h(), "rooms/1/state"), state);
   await Promise.all(
     ["host", "guest"].map(async (uid) => {
-      const db = context(uid);
+      const db = anonymous(uid);
       await get(ref(db, "rooms/1/state"));
       const result = await runTransaction(
         ref(db, "rooms/1/state"),
@@ -238,12 +248,12 @@ test("all three game state shapes pass validation and large extra payloads fail"
     await assertFails(set(ref(h(), "rooms/1/state/garbage"), "x".repeat(1000)));
   }
 });
-test("guest rejoining the same account preserves state; strangers cannot take over an active host", async () => {
+test("guest rejoining the same anonymous identity preserves state; strangers cannot take over an active host", async () => {
   const state = newGame(DEFAULT_SETTINGS, ["host", "guest"], "saved-match");
   await set(ref(h(), "rooms/1/state"), state);
   await assertSucceeds(set(ref(g(), "rooms/1/meta/guest"), "guest"));
   assert.equal(
-    (await get(ref(context("guest"), "rooms/1/state"))).val().id,
+    (await get(ref(anonymous("guest"), "rooms/1/state"))).val().id,
     "saved-match",
   );
   await assertFails(set(ref(outsider(), "rooms/1/meta"), meta("stranger")));
