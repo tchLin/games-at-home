@@ -13,4 +13,4 @@ export function wheelPoints(target, guess) {
   return gap <= 2 ? 4 : gap <= 6 ? 3 : gap <= 10 ? 2 : gap <= 14 ? 1 : 0;
 }
 export const spinTarget = () =>
-  14 + (crypto.getRandomValues(new Uint32Array(1))[0] % 73);
+  crypto.getRandomValues(new Uint32Array(1))[0] % 101;

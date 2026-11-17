@@ -9,8 +9,11 @@ import {
   resolve,
   maskWord,
   wheelPoints,
+  chainMasks,
+  revealChain,
+  CHAIN_HISTORY_LIMIT,
 } from "../src/engine.js";
-import { WHEEL_TOPICS, wheelPrompt, DEFAULT_SETTINGS } from "../src/content.js";
+import { WHEEL_TOPICS, wheelPrompt, WORDS, DEFAULT_SETTINGS } from "../src/content.js";
 const create = (game, extra = {}) =>
   newGame(
     { ...DEFAULT_SETTINGS, game, ...extra },
@@ -150,7 +153,7 @@ test("normalization and masking reveal only requested letters", () => {
   assert.equal(maskWord("coffee", 2), "co····");
 });
 
-test("the seven drawn scoring zones match the engine and fit every spin", () => {
+test("the seven scoring zones match the engine and allow edge spins", () => {
   assert.deepEqual(WHEEL_ZONES.map((zone) => zone.points), [1, 2, 3, 4, 3, 2, 1]);
   for (const zone of WHEEL_ZONES)
     assert.equal(wheelPoints(50, 50 + (zone.from + zone.to) / 2), zone.points);
@@ -160,7 +163,7 @@ test("the seven drawn scoring zones match the engine and fit every spin", () => 
   }
   for (let i = 0; i < 100; i++) {
     const target = spinTarget();
-    assert.ok(target >= 14 && target <= 86);
+    assert.ok(target >= 0 && target <= 100);
   }
 });
 test("a selected topic supplies matching opposites and changes them across rounds", () => {
@@ -217,4 +220,57 @@ test("reverse associations broaden coverage while exact phrase continuations ran
 test("uncertain or invalid words produce no noisy fuzzy fallback", () => {
   for (const word of ["", "co", "zzzzzz", "x".repeat(41), "__proto__", "constructor", "coffee<script>"])
     assert.deepEqual(wordSuggestions(word), { matches: [], ideas: [] });
+});
+
+test("only the first chain initial is shown and hints reveal one letter from zero", () => {
+  const words = ["coffee", "shop", "window"];
+  const masks = chainMasks(words);
+  assert.deepEqual(masks, ["c·····", "····", "······"]);
+  const game = { ...create("chain"), phase: "pending", turn: "host", boards: { guest: { masks } }, pending: { actor: "host", kind: "guess", value: "coffee", index: 0 } };
+  const correct = resolve(game, { words });
+  assert.equal(correct.boards.guest.masks[1], "····");
+  const hint = resolve({ ...correct, phase: "pending", pending: { actor: "host", kind: "hint", index: 1 } }, { words });
+  assert.equal(hint.boards.guest.masks[1], "s···");
+  assert.equal(hint.turn, "guest");
+  assert.equal(hint.boards.guest.letters[1], 1);
+});
+test("guess history is per word, records successes, and keeps bounded recent attempts", () => {
+  const words = ["coffee", "shop", "window"];
+  let game = { ...create("chain"), boards: { guest: { masks: chainMasks(words) } } };
+  for (let i = 0; i < 60; i++)
+    game = resolve({ ...game, phase: "pending", pending: { actor: "host", kind: "guess", value: `miss${i}`, index: 1 } }, { words });
+  game = resolve({ ...game, phase: "pending", pending: { actor: "host", kind: "guess", value: "shop", index: 1 } }, { words });
+  assert.equal(game.boards.guest.guessCounts[1], 61);
+  assert.equal(game.boards.guest.guesses[1].length, CHAIN_HISTORY_LIMIT);
+  assert.deepEqual(game.boards.guest.guesses[1].at(-1), { guess: "shop", correct: true });
+  assert.equal(game.boards.guest.guesses[0], undefined);
+});
+test("chain answers are published only after the game and only for a matching secret", () => {
+  const game = { ...create("chain"), boards: { host: { masks: chainMasks(["coffee", "shop", "window"]) } } };
+  const secret = { gameId: game.id, round: game.round, words: ["coffee", "shop", "window"] };
+  assert.equal(revealChain(game, secret, "host"), null);
+  const finished = { ...game, phase: "finished" };
+  assert.equal(revealChain(finished, { ...secret, gameId: "old-game" }, "host"), null);
+  const revealed = revealChain(finished, secret, "host");
+  assert.deepEqual(revealed.boards.host.answers, secret.words);
+  assert.equal(revealChain(revealed, secret, "host"), null);
+});
+test("each wheel topic has 16 distinct pairs and edge centers score correctly", () => {
+  for (const topic of Object.values(WHEEL_TOPICS)) {
+    assert.equal(topic.pairs.length, 16);
+    assert.equal(new Set(topic.pairs.map((pair) => pair.join("|"))).size, 16);
+  }
+  assert.equal(wheelPoints(0, 0), 4);
+  assert.equal(wheelPoints(100, 100), 4);
+  assert.equal(wheelPoints(0, 10), 2);
+  assert.equal(wheelPoints(100, 90), 2);
+});
+test("clue topics support fixed choices and change each round in surprise mode", () => {
+  assert.ok(Object.keys(WORDS).length >= 24);
+  const fixed = create("clues", { category: "Space" });
+  assert.equal(fixed.topicLabel, "Space");
+  assert.equal(nextRound(fixed).topicLabel, "Space");
+  const surprise = create("clues", { category: "surprise" });
+  assert.ok(WORDS[surprise.topicLabel]);
+  assert.notEqual(nextRound(surprise).topicLabel, surprise.topicLabel);
 });

@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { db, ref, set } from "./firebase.js";
 import { GAMES, suggestions } from "./content.js";
-import { other, deadline, nextRound, maskWord, normalize } from "./engine.js";
+import { other, deadline, nextRound, chainMasks, normalize } from "./engine.js";
 import { Dial } from "./art.jsx";
 import { spinTarget } from "./wheel.js";
 import { wordSuggestions } from "./word-links.js";
@@ -109,6 +109,7 @@ export default function Game(props) {
               </div>
             ))}
           </div>
+          {s.game === "chain" && <ChainAnswers s={s} uid={uid} secret={mine} name={props.name} />}
           {isHost ? (
             <Button
               onClick={() => act(() => set(ref(db, `${base}/state`), null))}
@@ -227,7 +228,7 @@ function Wheel({
             : s.phase === "clue" && giver
               ? "What belongs right here?"
               : s.clue
-                ? `“${s.clue}”`
+                ? "Where does this belong?"
                 : `${name(s.giver)} is finding the perfect clue.`}
         </h2>
         <p>
@@ -240,6 +241,9 @@ function Wheel({
                 : "The target stays hidden. Your clue is on its way."}
         </p>
       </div>
+      {s.clue && <div className="wheel-clue" aria-label="The clue">
+        <span>YOUR CLUE</span><strong>{s.clue}</strong>
+      </div>}
       <p className="wheel-topic"><span>TOPIC</span> {s.topicLabel || "Your topic"}</p>
       <div className="wheel-panel">
         <Dial
@@ -407,7 +411,7 @@ function Chain({
             ...v,
             boards: {
               ...v.boards,
-              [uid]: { masks: clean.map((w) => maskWord(w)) },
+              [uid]: { masks: chainMasks(clean) },
             },
           };
         });
@@ -425,7 +429,7 @@ function Chain({
           <p>
             {myBoard
               ? `Waiting for ${name(opponent)} to finish their chain.`
-              : `Build ${s.config.wordCount} connected words, one at a time. Each neighboring pair should make sense together. Your person sees only first letters.`}
+              : `Build ${s.config.wordCount} connected words, one at a time. Each neighboring pair should make sense together. Only word 1 starts with a letter; the others stay hidden until a letter hint.`}
           </p>
         </div>
         {myBoard ? (
@@ -500,7 +504,7 @@ function Chain({
         <h2>{myTurn ? "Follow the letters." : "A little thinking time."}</h2>
         <p>
           {myTurn
-            ? "Use the neighboring words and first letters to find the connections. Get a word right to keep going."
+            ? "Use the connections to guess. Later words stay hidden until you spend a turn revealing a letter."
             : `${name(s.turn)} is working on your words.`}
         </p>
       </div>
@@ -519,24 +523,18 @@ function Chain({
           </h3>
           <div className="word-rows">
             {board?.masks.map((word, i) => (
-              <button
-                key={i}
-                className={`word-row ${selected === i ? "chosen" : ""} ${board.solved?.[i] ? "solved" : ""}`}
-                onClick={() => setSelected(i)}
-                disabled={!!board.solved?.[i] || !myTurn || disabled}
-              >
-                <span className="word-number">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <span className="letter-mask">{word}</span>
-                {board.solved?.[i] ? (
-                  <Check size={17} />
-                ) : (
-                  <span className="word-length">
-                    {[...word].length} letters
-                  </span>
-                )}
-              </button>
+              <div key={i}>
+                <button
+                  className={`word-row ${selected === i ? "chosen" : ""} ${board.solved?.[i] ? "solved" : ""}`}
+                  onClick={() => setSelected(i)}
+                  disabled={!!board.solved?.[i] || !myTurn || disabled}
+                >
+                  <span className="word-number">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="letter-mask">{word}</span>
+                  {board.solved?.[i] ? <Check size={17} /> : <span className="word-length">{[...word].length} letters</span>}
+                </button>
+                <GuessTrail board={board} index={i} label={`Your guesses for word ${i + 1}`} expanded={selected === i} />
+              </div>
             ))}
           </div>
         </section>
@@ -546,11 +544,12 @@ function Chain({
             <EyeOff size={15} />
           </h3>
           {secret?.words.map((word, i) => (
-            <div key={i} className={myBoard?.solved?.[i] ? "crossed" : ""}>
-              <span>{word}</span>
-              <small>
-                {myBoard?.solved?.[i] ? "found" : "still a mystery"}
-              </small>
+            <div key={i} className="own-chain-word">
+              <div className={myBoard?.solved?.[i] ? "crossed" : ""}>
+                <span>{word}</span>
+                <small>{myBoard?.solved?.[i] ? "found" : "still a mystery"}</small>
+              </div>
+              <GuessTrail board={myBoard} index={i} label={`${name(opponent)}’s guesses for word ${i + 1}`} />
             </div>
           ))}
         </section>
@@ -595,6 +594,34 @@ function Chain({
     </>
   );
 }
+function GuessTrail({ board, index, label, expanded = false }) {
+  const guesses = board?.guesses?.[index] || [];
+  const count = board?.guessCounts?.[index] || guesses.length;
+  return <details className="word-guess-trail" open={expanded}>
+    <summary>{label} · {count}</summary>
+    {count > guesses.length && <small>Showing the latest {guesses.length} guesses.</small>}
+    {guesses.length ? <ol>{guesses.map((attempt, i) =>
+      <li key={i} className={attempt.correct ? "correct" : ""}>
+        <span>{attempt.guess}</span><span aria-label={attempt.correct ? "Correct" : "Incorrect"}>{attempt.correct ? "✓" : "×"}</span>
+      </li>)}</ol> : <p>No guesses yet.</p>}
+  </details>;
+}
+function ChainAnswers({ s, uid, secret, name }) {
+  return <div className="chain-answers">
+    <h3>Both chains, revealed</h3>
+    <div className="word-boards">{s.players.map((owner) => {
+      const board = s.boards?.[owner];
+      const answers = board?.answers || (owner === uid ? secret?.words : null);
+      return <section key={owner} aria-label={`${name(owner)}’s answers`}>
+        <h4>{name(owner)}’s chain</h4>
+        {answers ? <ol className="answer-list">{answers.map((word, i) => <li key={i}>
+          <strong>{word}</strong><span>{board.solved?.[i] ? "Guessed" : "Revealed at the end"}</span>
+          <GuessTrail board={board} index={i} label={`${name(other(s, owner))}’s guesses for word ${i + 1}`} />
+        </li>)}</ol> : <p>Waiting for {name(owner)} to reconnect and share their answers.</p>}
+      </section>;
+    })}</div>
+  </div>;
+}
 function Clues({
   s,
   secret,
@@ -610,6 +637,7 @@ function Clues({
   const [word, setWord] = useState(""),
     [hint, setHint] = useState(""),
     [guess, setGuess] = useState("");
+  const topic = s.topicLabel || s.config.category;
   const giver = s.giver === uid,
     reveal = s.phase === "reveal";
   const prepare = (e) => {
@@ -679,6 +707,8 @@ function Clues({
           )}
         </p>
       </div>
+      <p className="wheel-topic"><span>THIS ROUND’S TOPIC</span>{topic}</p>
+      <p className="clue-flow">Choose a word → Hint → {s.config.guessesPerHint} guesses → Adapt the next hint</p>
       {s.phase === "prepare" && giver && (
         <form className="action-form wide" onSubmit={prepare}>
           <Field label="Your secret word">
@@ -686,7 +716,7 @@ function Clues({
               autoFocus
               value={word}
               onChange={(e) => setWord(e.target.value)}
-              placeholder="Something worth guessing…"
+              placeholder={`Choose a word about ${topic}…`}
               maxLength={40}
               pattern="[^\s]+"
               title="One word without spaces"
@@ -694,7 +724,7 @@ function Clues({
               disabled={disabled}
             />
           </Field>
-          <WordIdeas category={s.config.category} onPick={setWord} />
+          <WordIdeas category={topic} onPick={setWord} />
           <Button disabled={disabled || !word.trim()}>
             Keep this word a secret
             <EyeOff size={17} />
@@ -719,6 +749,10 @@ function Clues({
               </div>
             ))}
           </div>
+          {!!s.attempts?.length && <ClueHistory s={s} />}
+          {giver && s.phase === "hint" && s.hintIndex > 0 && (
+            <Notice>Review {name(other(s, uid))}’s guesses above, then tailor hint {s.hintIndex + 1} to guide them closer.</Notice>
+          )}
           {giver && s.phase === "hint" && (
             <form onSubmit={sendHint} className="action-form">
               <Field
@@ -770,18 +804,6 @@ function Clues({
               </Button>
             </form>
           )}
-          {!!s.attempts?.length && (
-            <div className="guess-history">
-              <span>YOUR LITTLE TRAIL OF GUESSES</span>
-              <div>
-                {s.attempts.map((a, i) => (
-                  <span key={i} className={a.correct ? "correct" : ""}>
-                    {a.guess} {a.correct ? "✓" : "×"}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
           {reveal && (
             <div className="reveal-points">
               <strong>+{s.result.points}</strong>
@@ -803,4 +825,20 @@ function Clues({
       )}
     </>
   );
+}
+
+function ClueHistory({ s }) {
+  return <section className="clue-history" aria-label="Guesses so far">
+    <h3>Guesses so far</h3>
+    {[1, 2, 3].map((hintNumber) => {
+      const guesses = s.attempts.filter((attempt) => attempt.hint === hintNumber);
+      if (!guesses.length) return null;
+      return <div key={hintNumber}>
+        <h4>Hint {hintNumber}: {s.hints?.[hintNumber - 1]}</h4>
+        <ol>{guesses.map((attempt, index) => <li key={index}>
+          <span>{attempt.guess}</span><strong>{attempt.correct ? "Correct ✓" : "Not it ×"}</strong>
+        </li>)}</ol>
+      </div>;
+    })}
+  </section>;
 }

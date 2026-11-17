@@ -246,6 +246,34 @@
                   ".validate": "$index.matches(/^([0-9]|10|11)$/) && (newData.isNumber() && newData.val() >= 1 && newData.val() <= 40)"
                 }
               },
+              "guesses": {
+                "$index": {
+                  "$attempt": {
+                    ".validate": "$attempt.matches(/^([0-9]|[1-4][0-9])$/) && (newData.hasChildren(['guess', 'correct']))",
+                    "guess": {
+                      ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 80"
+                    },
+                    "correct": {
+                      ".validate": "newData.isBoolean()"
+                    },
+                    "$other": {
+                      ".validate": false
+                    }
+                  },
+                  ".validate": "$index.matches(/^([0-9]|10|11)$/) && (true)"
+                }
+              },
+              "guessCounts": {
+                "$index": {
+                  ".validate": "$index.matches(/^([0-9]|10|11)$/) && (newData.isNumber() && newData.val() >= 1 && newData.val() <= 1000000000)"
+                }
+              },
+              "answers": {
+                ".validate": "newData.parent().parent().parent().child('phase').val() === 'finished' && newData.parent().parent().parent().child('game').val() === 'chain' && newData.hasChildren(['0','1','2'])",
+                "$index": {
+                  ".validate": "$index.matches(/^([0-9]|10|11)$/) && (newData.isString() && newData.val().length > 0 && newData.val().length <= 40 && ((data.exists() && newData.val() === data.val()) || (auth.uid === $uid && newData.val() === root.child('secrets').child($slot).child($uid).child('words').child($index).val() && root.child('secrets').child($slot).child($uid).child('gameId').val() === newData.parent().parent().parent().parent().child('id').val() && root.child('secrets').child($slot).child($uid).child('round').val() === newData.parent().parent().parent().parent().child('round').val())))"
+                }
+              },
               "$other": {
                 ".validate": false
               }

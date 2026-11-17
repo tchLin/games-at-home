@@ -87,6 +87,23 @@ const state = {
         ".validate": "newData.numChildren() <= 12",
         $index: num(1, 40),
       },
+      guesses: {
+        $index: {
+          $attempt: {
+            ".validate": "newData.hasChildren(['guess', 'correct'])",
+            guess: str(80),
+            correct: bool,
+            $other: { ".validate": false },
+          },
+        },
+      },
+      guessCounts: { $index: num(1, 1e9) },
+      answers: {
+        ".validate": "newData.parent().parent().parent().child('phase').val() === 'finished' && newData.parent().parent().parent().child('game').val() === 'chain' && newData.hasChildren(['0','1','2'])",
+        $index: {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 40 && ((data.exists() && newData.val() === data.val()) || (auth.uid === $uid && newData.val() === root.child('secrets').child($slot).child($uid).child('words').child($index).val() && root.child('secrets').child($slot).child($uid).child('gameId').val() === newData.parent().parent().parent().parent().child('id').val() && root.child('secrets').child($slot).child($uid).child('round').val() === newData.parent().parent().parent().parent().child('round').val()))",
+        },
+      },
       $other: { ".validate": false },
     },
   },
@@ -242,8 +259,9 @@ const indexRule = (node, key, pattern) => {
 state.players["0"] = str(128);
 state.players["1"] = str(128);
 state.players.$other = { ".validate": false };
-for (const key of ["masks", "solved", "letters"])
+for (const key of ["masks", "solved", "letters", "guesses", "guessCounts", "answers"])
   indexRule(state.boards.$uid[key], "$index", "/^([0-9]|10|11)$/");
+indexRule(state.boards.$uid.guesses.$index, "$attempt", "/^([0-9]|[1-4][0-9])$/");
 indexRule(state.hints, "$i", "/^[0-2]$/");
 indexRule(state.attempts, "$i", "/^([0-9]|1[0-4])$/");
 indexRule(rules.secrets.$slot.$uid.words, "$i", "/^([0-9]|10|11)$/");

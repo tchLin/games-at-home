@@ -1,4 +1,4 @@
-import { wheelPrompt } from "./content.js";
+import { wheelPrompt, clueTopic } from "./content.js";
 import { wheelPoints } from "./wheel.js";
 export { wheelPoints } from "./wheel.js";
 export const normalize = (value) =>
@@ -12,6 +12,14 @@ export const deadline = (s, now) =>
   s.config.timer ? now + s.config.timer * 1000 : 0;
 export const maskWord = (word, count = 1) =>
   [...word].map((c, i) => (i < count ? c : "·")).join("");
+export const chainMasks = (words) => words.map((word, index) => maskWord(word, index === 0 ? 1 : 0));
+export const CHAIN_HISTORY_LIMIT = 50;
+export function revealChain(s, secret, uid) {
+  if (s.game !== "chain" || s.phase !== "finished" || !s.boards?.[uid] ||
+      s.boards[uid].answers || secret?.gameId !== s.id || secret.round !== s.round || !secret.words)
+    return null;
+  return { ...s, boards: { ...s.boards, [uid]: { ...s.boards[uid], answers: [...secret.words] } } };
+}
 export function newRound(s, now = Date.now()) {
   const giver = s.players[(s.round - 1) % 2];
   const common = {
@@ -35,7 +43,7 @@ export function newRound(s, now = Date.now()) {
   }
   if (s.game === "chain")
     return { ...common, phase: "setup", turn: s.players[0], boards: {} };
-  return { ...common, hints: [], attempts: [], hintIndex: 0, used: 0 };
+  return { ...common, topicSeed: s.topicSeed, topicLabel: clueTopic(s.config, s.topicSeed, s.round), hints: [], attempts: [], hintIndex: 0, used: 0 };
 }
 export function newGame(config, players, id, now = Date.now()) {
   return newRound(
@@ -81,6 +89,15 @@ export function resolve(s, secret, now = Date.now()) {
     if (!word || board.solved?.[p.index]) return null;
     board.solved ||= {};
     board.letters ||= {};
+    if (p.kind === "guess") {
+      board.guesses ||= {};
+      board.guessCounts ||= {};
+      board.guesses[p.index] = [
+        ...(board.guesses[p.index] || []),
+        { guess: p.value, correct: normalize(p.value) === normalize(word) },
+      ].slice(-CHAIN_HISTORY_LIMIT);
+      board.guessCounts[p.index] = (board.guessCounts[p.index] || 0) + 1;
+    }
     if (p.kind === "guess" && normalize(p.value) === normalize(word)) {
       board.solved[p.index] = true;
       board.masks[p.index] = word;
@@ -93,8 +110,8 @@ export function resolve(s, secret, now = Date.now()) {
     } else {
       if (p.kind === "hint") {
         board.letters[p.index] = Math.min(
-          (board.letters[p.index] || 1) + 1,
-          word.length,
+          (board.letters[p.index] ?? [...board.masks[p.index]].filter((c) => c !== "·").length) + 1,
+          [...word].length,
         );
         board.masks[p.index] = maskWord(word, board.letters[p.index]);
       }

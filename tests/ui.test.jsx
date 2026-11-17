@@ -7,6 +7,7 @@ import {
   fireEvent,
   waitFor,
   cleanup,
+  within,
 } from "@testing-library/react";
 vi.mock("../src/firebase.js", () => ({
   identity: vi.fn(async () => null),
@@ -34,7 +35,7 @@ vi.mock("../src/firebase.js", () => ({
 }));
 import App, { Lobby } from "../src/App.jsx";
 import Game from "../src/Game.jsx";
-import { newGame } from "../src/engine.js";
+import { newGame, chainMasks } from "../src/engine.js";
 import { DEFAULT_SETTINGS } from "../src/content.js";
 import { set, identity, guestLogin, createRoom, joinRoom, login } from "../src/firebase.js";
 beforeEach(() => {
@@ -154,7 +155,7 @@ describe("cozy home and game forms", () => {
     expect(set.mock.calls[0][0]).toBe("secrets/1/host");
     expect(set.mock.calls[0][1].words).toEqual(words);
     const state = p.mutate.mock.calls[0][0](p.room.state);
-    expect(state.boards.host.masks).toEqual(["c·····", "s···", "w·····", "s·······", "c···"]);
+    expect(state.boards.host.masks).toEqual(["c·····", "····", "······", "········", "····"]);
   });
   it("allows custom connections without dictionary approval or explanations", async () => {
     const p = props("chain");
@@ -241,5 +242,66 @@ describe("cozy home and game forms", () => {
     render(<Game {...p} />);
     expect(screen.getByText(/The secret word was “coffee”/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /One more round/ })).toBeTruthy();
+  });
+});
+
+describe("game review and readable round information", () => {
+  it("keeps wheel clues prominent during the reveal and clips scoring bands at either edge", () => {
+    const p = props("wheel");
+    p.room.state = { ...p.room.state, phase: "reveal", clue: "Pikachu", result: { target: 0, guess: 0, points: 4 } };
+    const { rerender } = render(<Game {...p} />);
+    expect(within(screen.getByLabelText("The clue")).getByText("Pikachu")).toBeTruthy();
+    expect([...document.querySelectorAll(".dial g text")].map((node) => node.textContent)).toEqual(["4", "3", "2", "1"]);
+    p.room.state.result = { target: 100, guess: 100, points: 4 };
+    rerender(<Game {...p} />);
+    expect([...document.querySelectorAll(".dial g text")].map((node) => node.textContent)).toEqual(["1", "2", "3", "4"]);
+  });
+  it("shows guess trails under both the opponent's words and the player's own chain", () => {
+    const p = props("chain", { secret: { gameId: "ui-match", round: 1, words: ["coffee", "shop", "window"] } });
+    p.room.state = { ...p.room.state, phase: "guess", turn: "host", boards: {
+      host: { masks: chainMasks(["coffee", "shop", "window"]), guesses: { 0: [{ guess: "cocoa", correct: false }] } },
+      guest: { masks: chainMasks(["rain", "bow", "tie"]), guesses: { 1: [{ guess: "boot", correct: false }] } },
+    } };
+    render(<Game {...p} />);
+    expect(screen.getByText("Your guesses for word 2 · 1")).toBeTruthy();
+    expect(screen.getByText("Sam’s guesses for word 1 · 1")).toBeTruthy();
+    expect(screen.getByText("cocoa")).toBeTruthy();
+    expect(screen.getByText("boot")).toBeTruthy();
+    expect(screen.queryByText("rain")).toBeNull();
+  });
+  it("reveals both complete chains and their guesses when the game ends", () => {
+    const p = props("chain");
+    p.room.state = { ...p.room.state, phase: "finished", winner: "guest", boards: {
+      host: { masks: chainMasks(["coffee", "shop", "window"]), answers: ["coffee", "shop", "window"], guesses: { 0: [{ guess: "cocoa", correct: false }] } },
+      guest: { masks: chainMasks(["rain", "bow", "tie"]), answers: ["rain", "bow", "tie"] },
+    } };
+    render(<Game {...p} />);
+    expect(within(screen.getByLabelText("Alex’s answers")).getByText("window")).toBeTruthy();
+    expect(within(screen.getByLabelText("Sam’s answers")).getByText("tie")).toBeTruthy();
+    expect(screen.getByText("cocoa")).toBeTruthy();
+  });
+  it("lets the giver tailor hint two using both previous guesses, then resets the guess allowance", async () => {
+    const p = props("clues", { secret: { gameId: "ui-match", round: 1, word: "coffee" } });
+    p.room.state = { ...p.room.state, topicLabel: "Food", phase: "hint", hintIndex: 1, used: 2, hints: ["warm"], attempts: [
+      { guess: "tea", correct: false, hint: 1 }, { guess: "cocoa", correct: false, hint: 1 },
+    ] };
+    const { rerender } = render(<Game {...p} />);
+    expect(screen.getByText("Food")).toBeTruthy();
+    const history = screen.getByLabelText("Guesses so far");
+    expect(within(history).getByText("tea")).toBeTruthy();
+    expect(within(history).getByText("cocoa")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Hint 2 · one word only"), { target: { value: "roasted" } });
+    fireEvent.click(screen.getByRole("button", { name: /Share this hint/ }));
+    await waitFor(() => expect(p.mutate).toHaveBeenCalled());
+    const next = p.mutate.mock.calls[0][0](p.room.state);
+    expect(next.hints).toEqual(["warm", "roasted"]);
+    expect(next.used).toBe(0);
+    expect(next.phase).toBe("guess");
+    p.room.state = next;
+    rerender(<Game {...p} uid="guest" isHost={false} secret={null} />);
+    expect(screen.getByLabelText("2 guesses left for this hint")).toBeTruthy();
+    expect(screen.queryByLabelText("Hint 3 · one word only")).toBeNull();
+    expect(screen.getByLabelText("Guesses so far")).toBeTruthy();
+    expect(screen.queryByText("coffee")).toBeNull();
   });
 });

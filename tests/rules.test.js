@@ -15,7 +15,7 @@ import {
   runTransaction,
   remove,
 } from "firebase/database";
-import { newGame, resolve, maskWord } from "../src/engine.js";
+import { newGame, resolve, maskWord, chainMasks, revealChain } from "../src/engine.js";
 import { DEFAULT_SETTINGS } from "../src/content.js";
 import { joinRoom } from "../src/rooms.js";
 let env;
@@ -306,4 +306,32 @@ test("actual invite flow rejects wrong codes and anonymous reserved-room entry",
     joinRoom(anonymous("public-guest"), "0ABCDEFG", "public-guest", "Sam"),
     /full, closed, or the code is incorrect/,
   );
+});
+
+test("chain guesses sync per word and full answers are shared only at game end", async () => {
+  let state = newGame({ ...DEFAULT_SETTINGS, game: "chain", wordCount: 3 }, ["host", "guest"], "chain-review");
+  const hostSecret = { gameId: state.id, round: 1, words: ["coffee", "shop", "window"] };
+  const guestSecret = { gameId: state.id, round: 1, words: ["rain", "bow", "tie"] };
+  state = { ...state, phase: "guess", boards: { host: { masks: chainMasks(hostSecret.words) }, guest: { masks: chainMasks(guestSecret.words) } } };
+  await set(ref(h(), "rooms/1/state"), state);
+  await set(ref(h(), "secrets/1/host"), hostSecret);
+  await set(ref(g(), "secrets/1/guest"), guestSecret);
+  await assertFails(set(ref(h(), "rooms/1/state/boards/host/answers"), hostSecret.words));
+  await assertFails(get(ref(g(), "secrets/1/host")));
+  state = resolve({ ...state, phase: "pending", pending: { actor: "guest", kind: "guess", value: "tea", index: 0 } }, hostSecret);
+  await assertSucceeds(set(ref(h(), "rooms/1/state"), state));
+  assert.equal((await get(ref(g(), "rooms/1/state/boards/host/guesses/0/0/guess"))).val(), "tea");
+  await assertFails(set(ref(h(), "rooms/1/state/boards/host/guesses/0/50"), { guess: "extra", correct: false }));
+  await assertFails(set(ref(h(), "rooms/1/state/boards/host/guesses/12/0"), { guess: "extra", correct: false }));
+  state = { ...state, phase: "finished", winner: "guest" };
+  await set(ref(h(), "rooms/1/state"), state);
+  await assertFails(set(ref(g(), "rooms/1/state/boards/host/answers"), hostSecret.words));
+  await assertFails(set(ref(h(), "rooms/1/state/boards/host/answers"), ["fake", "shop", "window"]));
+  state = revealChain(state, hostSecret, "host");
+  await assertSucceeds(set(ref(h(), "rooms/1/state"), state));
+  state = revealChain(state, guestSecret, "guest");
+  await assertSucceeds(set(ref(g(), "rooms/1/state"), state));
+  assert.deepEqual((await get(ref(h(), "rooms/1/state/boards/guest/answers"))).val(), guestSecret.words);
+  assert.deepEqual((await get(ref(g(), "rooms/1/state/boards/host/answers"))).val(), hostSecret.words);
+  await assertFails(get(ref(outsider(), "rooms/1/state")));
 });

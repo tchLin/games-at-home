@@ -810,11 +810,12 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
                 </Field>
               )}
               {cfg.game === "clues" && (
-                <Field label="Word suggestion mood">
+                <Field label="Clue topic">
                   <select
                     value={cfg.category}
                     onChange={(e) => change("category", e.target.value)}
                   >
+                    <option value="surprise">Surprise us each round</option>
                     {Object.keys(WORDS).map((k) => (
                       <option key={k}>{k}</option>
                     ))}
@@ -843,8 +844,8 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
               {cfg.game === "wheel"
                 ? "The system gives a topic and a pair of opposites. Spin to see a hidden 1–2–3–4–3–2–1 scoring band. Name something in that topic that would lead your partner to the 4-point zone. They place the needle, then you reveal and score. Swap roles each round."
                 : cfg.game === "chain"
-                  ? "Build a secret chain: every neighboring pair must form a meaningful connection, like coffee → shop → window → shopping → cart. Suggestions follow the word you type. Your partner sees first letters. Correct guesses keep your turn; wrong guesses or extra letters pass it. First to solve the other chain wins."
-                  : "Choose one secret word. Give three single-word hints, one at a time. Your partner gets the selected number of guesses per hint. Earlier solves earn more points. Swap roles each round."}
+                  ? "Build a secret chain: every neighboring pair must form a meaningful connection, like coffee → shop → window → shopping → cart. Suggestions follow the word you type. Only the first word starts with a visible initial. All other letters require a hint. Correct guesses keep your turn; wrong guesses or letter hints pass it. Both chains and each word’s guess history are shown at the end. First to solve the other chain wins."
+                  : "Choose a word that fits the topic, then give the first single-word hint. Your partner gets two guesses by default (adjustable above). Review their guesses before tailoring each next hint. Up to three hints; a correct guess ends the round. Swap roles each round."}
             </p>
             <small>
               Timers apply to guessing. Preparation is untimed. The clock pauses

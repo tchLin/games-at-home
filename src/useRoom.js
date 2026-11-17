@@ -12,7 +12,7 @@ import {
   roomPath,
   slotOf,
 } from "./firebase.js";
-import { resolve, other, deadline } from "./engine.js";
+import { resolve, other, deadline, revealChain } from "./engine.js";
 export function useRoom(code, uid, onError) {
   const [room, setRoom] = useState({});
   const [secret, setSecret] = useState(null);
@@ -104,6 +104,10 @@ export function useRoom(code, uid, onError) {
     const mySecret =
       secret?.gameId === s.id && secret.round === s.round ? secret : null;
     const run = async () => {
+      if (s.game === "chain" && s.phase === "finished" && mySecret?.words && !s.boards?.[uid]?.answers) {
+        await mutate((v) => revealChain(v, mySecret, uid), s);
+        return;
+      }
       if (
         !bothOnline &&
         !s.pausedAt &&
