@@ -1853,7 +1853,7 @@ footer span {
 .game-change-request p { font-size: 14px; line-height: 1.6; }
 
 .game-card.rose, .lobby-game.rose { background: #f1dfda; }
-.reverse-game { text-align: center; }
+.reverse-game { width: 100%; max-width: 640px; min-width: 0; margin: 0 auto; text-align: center; }
 .reverse-game p, .reverse-game input { font-size: 16px; }
 .reverse-game small, .reverse-game .field > span, .reverse-game .button,
 .play-area.rose .tag, .lobby-game.rose small { font-size: 14px; }
@@ -1866,3 +1866,20 @@ footer span {
 .audio-actions p, .audio-actions small { margin: 0; line-height: 1.6; }
 .audio-actions .action-form { width: 100%; }
 .recording-status { color: #a4463c; font-weight: 700; }
+.lobby-game.rose .art { flex-shrink: 0; }
+.lobby-game.rose > span:not(.radio-mark) { min-width: 0; }
+.lobby-game.rose strong { overflow-wrap: anywhere; }
+.reverse-game .stage-title p { max-width: 520px; margin: 0 auto; line-height: 1.6; }
+.reverse-game .field { text-align: left; }
+.reverse-game .audio-actions { width: 100%; }
+.reverse-game .audio-actions > .button { width: 100%; max-width: 390px; min-height: 48px; }
+.reverse-game .form-buttons { display: flex; width: 100%; gap: 12px; flex-wrap: wrap; }
+.reverse-game .form-buttons .button { flex: 1 1 130px; }
+.reverse-game .audio-actions small { color: #766052; }
+@media (max-width: 600px) {
+  .play-area.rose .game-heading { align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+  .play-area.rose .game-heading h1 { font-size: 28px; }
+  .play-area.rose .game-stage { padding: 24px 18px; }
+  .reverse-game .stage-title h2 { font-size: 28px; }
+  .reverse-game .audio-actions { gap: 14px; }
+}

@@ -1,5 +1,6 @@
 import { wheelPrompt, clueTopic } from "./content.js";
 import { wheelPoints } from "./wheel.js";
+import { isExactReverseGuess } from './reverse-game.js';
 export { wheelPoints } from "./wheel.js";
 export const normalize = (value) =>
   String(value || "")
@@ -67,7 +68,8 @@ export function nextRound(s, now = Date.now()) {
 }
 export function resolve(s, secret, now = Date.now()) {
   if (s.phase !== "pending" || !s.pending || !secret) return null;
-  if (s.game === "reverse") return s.pending.kind === "timeout" ? judgeReverse(s, secret, false) : null;
+  if (s.game === "reverse") return s.pending.kind === "timeout" ? judgeReverse(s, secret, false)
+    : isExactReverseGuess(s, secret) ? judgeReverse(s, secret, true) : null;
   const p = s.pending;
   const next = structuredClone(s);
   delete next.pending;

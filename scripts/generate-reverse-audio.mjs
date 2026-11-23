@@ -1,16 +1,24 @@
-// Offline-only build tool. See public/licenses/reverse-audio.txt for setup.
+// Offline neural speech build tool; never imported by the website.
+// Setup and licenses: public/licenses/reverse-audio.txt.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { REVERSE_WORDS } from '../src/reverse-words.js';
 
+const MODEL = 'onnx-community/Kokoro-82M-v1.0-ONNX';
+const REVISION = '1939ad2a8e416c0acfeecc08a694d14ef25f2231';
+const VOICE = 'af_heart';
+const SPEED = 0.95;
 const args = process.argv.slice(2);
 const option = (key) => args[args.indexOf(key) + 1];
-if (!args.includes('--engine') || !args.includes('--dictionary')) {
-  throw new Error('Usage: node scripts/generate-reverse-audio.mjs --engine /path/to/spellophone/dist/node.js --dictionary /path/to/cmudict.dict');
+if (!args.includes('--tools') || !args.includes('--dictionary')) {
+  throw new Error('Usage: node scripts/generate-reverse-audio.mjs --tools /tmp/reverse-neural-tools --dictionary /path/to/cmudict.dict');
 }
-const { createEspeak, encodeWav } = await import(pathToFileURL(resolve(option('--engine'))));
+const tools = resolve(option('--tools'));
+const { KokoroTTS } = await import(pathToFileURL(join(tools, 'node_modules/kokoro-js/dist/kokoro.js')));
+const { env, StyleTextToSpeech2Model, AutoTokenizer } = await import(pathToFileURL(join(tools, 'node_modules/@huggingface/transformers/dist/transformers.node.mjs')));
+env.cacheDir = join(tools, 'cache');
 const dictionaryBytes = await readFile(resolve(option('--dictionary')));
 const syllables = new Map();
 for (const line of dictionaryBytes.toString().split('\n')) {
@@ -32,50 +40,63 @@ for (const [count, words] of Object.entries(REVERSE_WORDS)) {
   }
 }
 
-// Short mono PCM WAVs work with decodeAudioData on mobile Safari and Chromium.
-// Trim only near-silence with 25 ms padding. A windowed sinc low-pass resampler
-// prevents high frequencies aliasing when converting eSpeak's 22,050 Hz output.
-function compact(samples, sourceRate, targetRate = 16000) {
+function encodeWav(samples, sampleRate) {
+  if (sampleRate !== 24000 || !samples.length || samples.some((x) => !Number.isFinite(x))) {
+    throw new Error('Neural model returned invalid audio.');
+  }
   let start = 0, end = samples.length;
-  while (start < end && Math.abs(samples[start]) < 48) start++;
-  while (end > start && Math.abs(samples[end - 1]) < 48) end--;
-  const pad = Math.round(sourceRate * 0.025);
+  // Keep quiet consonants: trim only silence below -60 dB, with 40 ms padding.
+  while (start < end && Math.abs(samples[start]) < 0.001) start++;
+  while (end > start && Math.abs(samples[end - 1]) < 0.001) end--;
+  const pad = Math.round(sampleRate * 0.04);
   start = Math.max(0, start - pad);
   end = Math.min(samples.length, end + pad);
-  if (end - start < sourceRate * 0.1) throw new Error('Synthesizer returned empty speech.');
-  const output = new Int16Array(Math.ceil((end - start) * targetRate / sourceRate));
-  const cutoff = Math.min(1, targetRate / sourceRate) * 0.94;
-  const radius = 16;
-  for (let i = 0; i < output.length; i++) {
-    const position = start + i * sourceRate / targetRate;
-    let sum = 0, weight = 0;
-    for (let j = Math.ceil(position - radius); j <= Math.floor(position + radius); j++) {
-      if (j < start || j >= end) continue;
-      const delta = position - j;
-      const x = Math.PI * cutoff * delta;
-      const sinc = Math.abs(x) < 1e-8 ? 1 : Math.sin(x) / x;
-      const window = 0.5 + 0.5 * Math.cos(Math.PI * delta / radius);
-      const w = cutoff * sinc * window;
-      sum += samples[j] * w;
-      weight += w;
-    }
-    output[i] = Math.max(-32768, Math.min(32767, Math.round(sum / weight)));
+  if (end - start < sampleRate * 0.15 || end - start > sampleRate * 4) {
+    throw new Error('Neural model returned unexpected speech duration.');
   }
-  return output;
+  const wav = Buffer.alloc(44 + (end - start) * 2);
+  wav.write('RIFF', 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(sampleRate, 24); wav.writeUInt32LE(sampleRate * 2, 28);
+  wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36);
+  wav.writeUInt32LE(wav.length - 44, 40);
+  for (let i = start; i < end; i++) {
+    wav.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(samples[i] * 32767))), 44 + (i - start) * 2);
+  }
+  return wav;
 }
 
 const out = fileURLToPath(new URL('../public/reverse-words/', import.meta.url));
 await mkdir(out, { recursive: true });
-const engine = await createEspeak({ languages: ['en'] });
-let bytes = 0;
+const [model, tokenizer] = await Promise.all([
+  StyleTextToSpeech2Model.from_pretrained(MODEL, { revision: REVISION, dtype: 'fp32', device: 'cpu' }),
+  AutoTokenizer.from_pretrained(MODEL, { revision: REVISION }),
+]);
+const tts = new KokoroTTS(model, tokenizer);
+const manifest = {
+  model: MODEL, revision: REVISION, dtype: 'fp32', voice: VOICE, speed: SPEED,
+  sampleRate: 24000, channels: 1, bitsPerSample: 16,
+  dictionarySha256: createHash('sha256').update(dictionaryBytes).digest('hex'),
+  clips: {},
+};
+let bytes = 0, completed = 0;
 for (const word of seen) {
-  const result = engine.synthesize(word, { voice: 'en-us', rate: 150, pitch: 50, endPause: false });
-  const wav = encodeWav(compact(result.samples, result.sampleRate), 16000);
+  // Sentence punctuation improves isolated-word prosody without adding words.
+  // This must complete neural model inference; there is no robotic TTS fallback.
+  const result = await tts.generate(`${word}.`, { voice: VOICE, speed: SPEED });
+  const wav = encodeWav(result.audio, result.sampling_rate);
   await writeFile(join(out, `${word}.wav`), wav);
-  bytes += wav.byteLength;
+  manifest.clips[word] = {
+    bytes: wav.length,
+    seconds: (wav.length - 44) / 48000,
+    sha256: createHash('sha256').update(wav).digest('hex'),
+  };
+  bytes += wav.length;
+  if (++completed % 50 === 0) console.log(`Generated ${completed}/${seen.size} neural clips.`);
 }
+const manifestPath = fileURLToPath(new URL('../public/licenses/reverse-audio-manifest.json', import.meta.url));
+await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 console.log(JSON.stringify({
   counts: Object.fromEntries(Object.entries(REVERSE_WORDS).map(([n, words]) => [n, words.length])),
-  clips: seen.size, bytes, sampleRate: 16000, channels: 1, bitsPerSample: 16,
-  dictionarySha256: createHash('sha256').update(dictionaryBytes).digest('hex'),
+  clips: seen.size, bytes, sampleRate: 24000, channels: 1, bitsPerSample: 16,
 }, null, 2));

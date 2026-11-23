@@ -1,10 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { reverseWav, toBase64, fromBase64, SAMPLE_RATE, MAX_AUDIO_BASE64 } from '../src/reverse-audio.js';
 import { newGame, nextRound, resolve, judgeReverse } from '../src/engine.js';
 import { DEFAULT_SETTINGS } from '../src/content.js';
 import { REVERSE_WORDS } from '../src/reverse-words.js';
+import { chooseReverseWord, reverseWordAssignment } from '../src/reverse-game.js';
+
+test('exact answers pass automatically while spelling variants stay for manual review', () => {
+  const s = { ...newGame({ ...DEFAULT_SETTINGS, game: 'reverse' }, ['a','b'], 'exact'), phase: 'pending',
+    pending: { actor: 'b', kind: 'guess', value: '  BaNaNa  ' } };
+  const secret = { gameId: s.id, round: s.round, word: 'banana' };
+  assert.equal(resolve(s, secret).result.correct, true);
+  assert.equal(resolve(s, secret).scores.b, 1);
+  assert.equal(resolve(s, { ...secret, round: 2 }), null);
+  for (const value of ['bananna', 'b a n a n a', 'banana!', 'apple'])
+    assert.equal(resolve({ ...s, pending: { ...s.pending, value } }, secret), null);
+});
+
+test('automatic word assignment preserves a reconnecting player’s word and renews each round', () => {
+  const s = newGame({ ...DEFAULT_SETTINGS, game: 'reverse' }, ['a','b'], 'assign');
+  const assigned = reverseWordAssignment(null, s, chooseReverseWord(3, 0));
+  assert.ok(REVERSE_WORDS[3].includes(assigned.word));
+  assert.equal(reverseWordAssignment(assigned, s, 'different'), undefined);
+  assert.equal(reverseWordAssignment(assigned, { ...s, round: 2 }, 'coffee').word, 'coffee');
+  assert.equal(reverseWordAssignment(null, { ...s, phase: 'recording' }, 'coffee'), undefined);
+});
 
 test('reversed audio is mono PCM WAV with reversed samples and correct header', () => {
   const bytes = reverseWav([new Float32Array([-.75, 0, .5, 1])], SAMPLE_RATE);
@@ -49,16 +71,22 @@ test('timeout and interrupted take reveal for zero points', () => {
   assert.equal(skip.result.correct, false); assert.equal(skip.scores.b, 0);
 });
 test('every syllable level has a large unique bank of playable bundled WAVs', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../public/licenses/reverse-audio-manifest.json', import.meta.url)));
   const words = Object.values(REVERSE_WORDS).flat();
+  assert.equal(manifest.model, 'onnx-community/Kokoro-82M-v1.0-ONNX');
+  assert.equal(manifest.voice, 'af_heart');
+  assert.equal(Object.keys(manifest.clips).length, words.length);
   assert.equal(new Set(words).size, words.length);
   for (const bank of Object.values(REVERSE_WORDS)) {
     assert.ok(bank.length >= 100);
     for (const word of bank) {
       const bytes = readFileSync(new URL(`../public/reverse-words/${word}.wav`, import.meta.url));
       assert.equal(bytes.toString('ascii', 0, 4), 'RIFF');
-      assert.equal(bytes.readUInt32LE(24), 16000);
+      assert.equal(bytes.readUInt32LE(24), 24000);
       assert.equal(bytes.readUInt32LE(40), bytes.length - 44);
-      assert.ok(bytes.length > 1000 && bytes.length < 50000);
+      assert.ok(bytes.length > 1000 && bytes.length < 200000);
+      assert.equal(bytes.length, manifest.clips[word].bytes);
+      assert.equal(createHash('sha256').update(bytes).digest('hex'), manifest.clips[word].sha256);
     }
   }
 });

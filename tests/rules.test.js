@@ -21,6 +21,7 @@ import { requestGameChange, respondToGameChange, completeGameChange } from "../s
 import { lobbyStartUpdate } from "../src/lobby.js";
 import { joinRoom } from "../src/rooms.js";
 import { reverseWav, toBase64 } from '../src/reverse-audio.js';
+import { reverseWordAssignment } from '../src/reverse-game.js';
 let env;
 const token = (email) => ({
   email,
@@ -500,4 +501,27 @@ test('reverse timeout and skip reveal for zero; game change deletes the recordin
   await assertSucceeds(set(ref(h(), 'secrets/1/host'), target));
   await assertSucceeds(set(ref(h(), 'rooms/1/state'), recording));
   await assertSucceeds(set(ref(h(), 'rooms/1/state'), judgeReverse(recording, target, false, true)));
+});
+
+test('automatic secret assignment survives concurrent tabs and exact guesses resolve privately', async () => {
+  let { state, secret, clip } = await reverseFixture();
+  const first = h(), second = h();
+  await Promise.all([
+    runTransaction(ref(first, 'secrets/1/host'), (current) => reverseWordAssignment(current, state, 'apple'), { applyLocally: false }),
+    runTransaction(ref(second, 'secrets/1/host'), (current) => reverseWordAssignment(current, state, 'coffee'), { applyLocally: false }),
+  ]);
+  assert.equal((await get(ref(h(), 'secrets/1/host'))).val().word, 'banana');
+  state = { ...state, phase: 'recording', recorded: true };
+  await set(ref(h(), 'rooms/1/state'), state);
+  await set(ref(h(), 'roundAudio/1'), clip);
+  state = { ...state, phase: 'guess' };
+  await set(ref(h(), 'rooms/1/state'), state);
+  state = { ...state, phase: 'pending', pending: { actor: 'guest', kind: 'guess', value: 'BANANA' } };
+  await set(ref(g(), 'rooms/1/state'), state);
+  const resolved = resolve(state, secret);
+  assert.equal(resolved.phase, 'reveal');
+  assert.equal(resolved.scores.guest, 1);
+  await assertSucceeds(set(ref(h(), 'rooms/1/state'), resolved));
+  assert.equal((await get(ref(g(), 'rooms/1/state/result/word'))).val(), 'banana');
+  await assertFails(get(ref(g(), 'secrets/1/host')));
 });

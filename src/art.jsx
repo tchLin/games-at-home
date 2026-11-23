@@ -159,7 +159,7 @@ export function ClueArt() {
   );
 }
 export function GameArt({ game }) {
-  if (game === 'reverse') return <svg viewBox="0 0 300 190" aria-hidden="true">
+  if (game === 'reverse') return <svg className="art" viewBox="0 0 300 190" aria-hidden="true">
     <ellipse cx="150" cy="161" rx="84" ry="12" fill="#d9b8b1" opacity=".3" />
     <rect x="122" y="32" width="56" height="92" rx="28" fill="#bb756d" />
     <path d="M108 91v9a42 42 0 0 0 84 0v-9M150 143v19M130 163h40" fill="none" stroke="#724e4b" strokeWidth="7" strokeLinecap="round" />

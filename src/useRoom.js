@@ -14,6 +14,7 @@ import {
 } from "./firebase.js";
 import { completeGameChange } from "./game-change.js";
 import { resolve, other, deadline, revealChain } from "./engine.js";
+import { chooseReverseWord, reverseWordAssignment, isExactReverseGuess } from './reverse-game.js';
 export function useRoom(code, uid, onError) {
   const [room, setRoom] = useState({});
   const [secret, setSecret] = useState(null);
@@ -117,6 +118,11 @@ export function useRoom(code, uid, onError) {
     const mySecret =
       secret?.gameId === s.id && secret.round === s.round ? secret : null;
     const run = async () => {
+      if (s.game === 'reverse' && s.phase === 'prepare' && s.giver === uid && !mySecret?.word) {
+        const word = chooseReverseWord(s.config.reverseSyllables);
+        await runTransaction(ref(db, secretPath), (current) => reverseWordAssignment(current, s, word), { applyLocally: false });
+        return;
+      }
       if (s.game === "chain" && s.phase === "finished" && mySecret?.words && !s.boards?.[uid]?.answers) {
         await mutate((v) => revealChain(v, mySecret, uid), s);
         return;
@@ -151,7 +157,7 @@ export function useRoom(code, uid, onError) {
         return;
       }
       const judge = s.game === "chain" ? other(s, s.pending?.actor) : s.giver;
-      if (s.phase === "pending" && judge === uid && mySecret && (s.game !== 'reverse' || s.pending?.kind === 'timeout')) {
+      if (s.phase === "pending" && judge === uid && mySecret && (s.game !== 'reverse' || s.pending?.kind === 'timeout' || isExactReverseGuess(s, mySecret))) {
         await mutate((v) => resolve(v, mySecret, now), s);
         return;
       }

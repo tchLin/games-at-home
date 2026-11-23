@@ -89,5 +89,5 @@ export const REVERSE_WORDS = {
 
 export function pronunciationUrl(word) {
   if (!Object.values(REVERSE_WORDS).some((words) => words.includes(word))) throw new Error('Unknown pronunciation word.');
-  return `${import.meta.env.BASE_URL}reverse-words/${word}.wav`;
+  return `${import.meta.env.BASE_URL}reverse-words/${word}.wav?v=kokoro-heart-1`;
 }

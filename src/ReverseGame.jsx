@@ -3,11 +3,12 @@ import { Mic, Play, Square, Check, X } from 'lucide-react';
 import { db, ref, set, get } from './firebase.js';
 import { Button, Field, Tag, Notice } from './App.jsx';
 import { deadline, judgeReverse } from './engine.js';
-import { REVERSE_WORDS, pronunciationUrl } from './reverse-words.js';
+import { pronunciationUrl } from './reverse-words.js';
+import { isExactReverseGuess } from './reverse-game.js';
 import { RECORD_SECONDS, audioContext, decode, playBuffer, microphone, reverseWav, toBase64, fromBase64 } from './reverse-audio.js';
 import { sounds } from './sound.js';
 
-export default function ReverseGame({ room, s, secret, uid, name, disabled, mutate, act, now, secretPath, base, send }) {
+export default function ReverseGame({ room, s, secret, uid, name, disabled, mutate, act, now, base, send }) {
   const [guess, setGuess] = useState('');
   const [recording, setRecording] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -38,14 +39,6 @@ export default function ReverseGame({ room, s, secret, uid, name, disabled, muta
     await r.context.resume();
     return r.context;
   };
-  const draw = () => act(async () => {
-    const pool = REVERSE_WORDS[s.config.reverseSyllables || 1];
-    // The private assignment survives refresh; preparing the same turn is not a reroll.
-    const existing = (await get(ref(db, secretPath))).val();
-    if (existing?.gameId === s.id && existing.round === s.round) return;
-    const random = crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296;
-    await set(ref(db, secretPath), { gameId: s.id, round: s.round, word: pool[Math.floor(random * pool.length)] });
-  });
   const listen = (reference) => act(async () => {
     const r = resources.current;
     const ctx = await context(); // Unlock audio during the user gesture, before fetching.
@@ -117,6 +110,7 @@ export default function ReverseGame({ room, s, secret, uid, name, disabled, muta
   });
   const verdict = (pass, skip = false) => act(() => mutate((v) => judgeReverse(v, secret, pass, skip), s));
   const reveal = s.phase === 'reveal';
+  const exact = isExactReverseGuess(s, secret);
   return <div className="reverse-game">
     <div className="stage-title">
       <Tag>{reveal ? 'THE WORD WAS…' : giver ? 'YOU’RE THE VOICE' : 'YOU’RE THE LISTENER'}</Tag>
@@ -126,7 +120,7 @@ export default function ReverseGame({ room, s, secret, uid, name, disabled, muta
         : `${name(s.giver)} is making a backwards recording. You get three listens and one guess.`}</p>
     </div>
     {giver && !reveal && secret?.word && <p className="reverse-secret"><span>YOUR SECRET WORD</span><strong>{secret.word}</strong></p>}
-    {giver && s.phase === 'prepare' && !secret?.word && <Button disabled={disabled} onClick={draw}>Get my word</Button>}
+    {giver && s.phase === 'prepare' && !secret?.word && <Notice>Getting your word ready…</Notice>}
     {giver && s.phase === 'prepare' && secret?.word && <div className="audio-actions">
       <Button secondary data-sound="off" disabled={disabled || playing} onClick={() => listen(true)}><Play size={18} />{playing ? 'Playing backwards…' : 'Hear it backwards'}</Button>
       <Button data-sound="off" disabled={disabled || playing} onClick={record}><Mic size={18} />Record my one take</Button>
@@ -142,18 +136,18 @@ export default function ReverseGame({ room, s, secret, uid, name, disabled, muta
     </div>}
     {!giver && s.phase === 'guess' && <div className="audio-actions">
       <Button data-sound="off" disabled={disabled || playing || s.plays >= 3} onClick={() => listen(false)}><Play size={18} />{playing ? 'Playing…' : `Listen · ${3 - s.plays} left`}</Button>
-      <p aria-live="polite">{s.plays} of 3 listens used. One guess—your partner decides if it counts.</p>
+      <p aria-live="polite">{s.plays} of 3 listens used. One guess. Exact answers pass automatically; your partner can accept a spelling slip.</p>
       <form className="action-form" onSubmit={(event) => { event.preventDefault(); send('guess', guess.trim()); }}>
         <Field label="Your one guess"><input value={guess} onChange={(event) => setGuess(event.target.value)} maxLength={80} required disabled={disabled} placeholder="What word did you hear?" /></Field>
         <Button disabled={disabled || !guess.trim()}>Submit my guess</Button>
       </form>
     </div>}
     {s.pending?.kind === 'guess' && <p className="reverse-answer"><span>{name(s.pending.actor)} guessed</span><strong>{s.pending.value}</strong></p>}
-    {s.phase === 'pending' && s.pending?.kind === 'guess' && (giver ? <div className="audio-actions">
+    {s.phase === 'pending' && s.pending?.kind === 'guess' && (giver ? exact ? <Notice>That’s an exact match! Adding your point…</Notice> : <div className="audio-actions">
       <p>Does their guess count? Spelling doesn’t have to be perfect.</p>
       <div className="form-buttons"><Button disabled={disabled || !secret?.word} onClick={() => verdict(true)}><Check size={18} />Pass</Button>
         <Button secondary disabled={disabled || !secret?.word} onClick={() => verdict(false)}><X size={18} />No pass</Button></div>
-    </div> : <Notice>Waiting for {name(s.giver)} to mark Pass or No pass.</Notice>)}
+    </div> : <Notice>Checking your guess. Exact answers pass automatically; {name(s.giver)} can accept other spellings.</Notice>)}
     {giver && s.phase === 'guess' && <Notice>Your recording is ready. {name(s.players.find((p) => p !== uid))} has used {s.plays} of 3 listens.</Notice>}
     {!giver && ['prepare', 'recording'].includes(s.phase) && <Notice>Waiting for the one-take recording…</Notice>}
   </div>;

@@ -43,7 +43,7 @@ import * as reverseAudio from '../src/reverse-audio.js';
 import * as gameChangeActions from "../src/game-change.js";
 import { newGame, chainMasks } from "../src/engine.js";
 import { DEFAULT_SETTINGS } from "../src/content.js";
-import { set, get, identity, guestLogin, createRoom, joinRoom, login, update, onValue, presence } from "../src/firebase.js";
+import { set, get, identity, guestLogin, createRoom, joinRoom, login, update, onValue, presence, runTransaction } from "../src/firebase.js";
 beforeEach(() => {
   identity.mockResolvedValue(null);
   createRoom.mockResolvedValue("1ABCDEFG");
@@ -447,7 +447,7 @@ describe('Backwards & Forwards', () => {
     p.room.state = pending;
     rerender(<Game {...p} />);
     expect(screen.queryByLabelText('Your one guess')).toBeNull();
-    expect(screen.getByText(/Waiting for Alex to mark Pass or No pass/)).toBeTruthy();
+    expect(screen.getByText(/Checking your guess. Exact answers pass automatically/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Pass' })).toBeNull();
     rerender(<Game {...p} uid="host" secret={{ gameId: pending.id, round: 1, word: 'banana' }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Pass' }));
@@ -490,4 +490,63 @@ describe('Backwards & Forwards', () => {
     expect(mic.cancel).toHaveBeenCalled();
     expect(p.mutate.mock.calls.at(-1)[0](p.room.state).phase).toBe('guess');
   });
+});
+
+it('uses the shared responsive illustration sizing for the new game card', () => {
+  render(<App />);
+  const card = screen.getByRole('heading', { name: 'Backwards & Forwards' }).closest('button');
+  expect(card.querySelector('svg.art')).toBeTruthy();
+});
+
+it('shows an automatic loading state without a word-reveal button, and hides manual judging for exact answers', () => {
+  const p = props('reverse');
+  const { rerender } = render(<Game {...p} />);
+  expect(screen.getByText('Getting your word ready…')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Get my word|Reveal my word/ })).toBeNull();
+  p.secret = { gameId: p.room.state.id, round: 1, word: 'banana' };
+  p.room.state = { ...p.room.state, phase: 'pending', pending: { actor: 'guest', kind: 'guess', value: 'BANANA' } };
+  rerender(<Game {...p} />);
+  expect(screen.getByText(/That’s an exact match/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Pass' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'No pass' })).toBeNull();
+});
+
+it('assigns a private word on entering the round, then automatically resolves an exact guess', async () => {
+  const listeners = new Map();
+  let storedSecret = null;
+  let state = newGame({ ...DEFAULT_SETTINGS, game: 'reverse', reverseSyllables: 3 }, ['host', 'guest'], 'auto-match');
+  const report = vi.fn();
+  onValue.mockImplementation((path, callback) => { listeners.set(path, callback); return () => {}; });
+  presence.mockImplementation((code, uid, callback) => { callback(true); return () => {}; });
+  runTransaction.mockImplementation(async (path, fn) => {
+    if (path === 'secrets/1/host') {
+      storedSecret = fn(storedSecret) || storedSecret;
+      listeners.get(path)({ val: () => storedSecret });
+    } else if (path === 'rooms/1/state') {
+      state = fn(state) || state;
+      listeners.get(path)({ val: () => state });
+    }
+    return { committed: true };
+  });
+  try {
+    const { unmount } = renderHook(() => useRoom('1ABCDEFG', 'host', report));
+    reactAct(() => {
+      listeners.get('rooms/1/meta')({ val: () => ({ host: 'host', guest: 'guest', code: '1ABCDEFG', open: true, leaseEnd: Date.now() + 60000 }) });
+      listeners.get('rooms/1/presence')({ val: () => ({ host: { 0: true }, guest: { 0: true } }) });
+      listeners.get('rooms/1/state')({ val: () => state });
+    });
+    await waitFor(() => expect(storedSecret?.word).toBeTruthy());
+    await reactAct(async () => {});
+    expect(runTransaction.mock.calls[0][0]).toBe('secrets/1/host');
+    state = { ...state, phase: 'pending', pending: { actor: 'guest', kind: 'guess', value: storedSecret.word.toUpperCase() } };
+    reactAct(() => listeners.get('rooms/1/state')({ val: () => state }));
+    await waitFor(() => expect(state.phase).toBe('reveal'));
+    expect(state.scores.guest).toBe(1);
+    expect(report).not.toHaveBeenCalled();
+    unmount();
+  } finally {
+    onValue.mockImplementation(() => () => {});
+    presence.mockImplementation(() => () => {});
+    runTransaction.mockReset();
+  }
 });
