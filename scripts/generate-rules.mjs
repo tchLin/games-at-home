@@ -1,4 +1,5 @@
 import { writeFileSync } from "node:fs";
+import { multiplayerRules } from "./multiplayer-rules.mjs";
 const signed =
   "auth != null && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com'";
 const player = `auth != null && (auth.token.firebase.sign_in_provider === 'anonymous' || (${signed}))`;
@@ -9,7 +10,9 @@ const slot =
 const allowed = `${player} && ${slot} && ($slot !== '0' || ${priority})`;
 const meta = "root.child('rooms').child($slot).child('meta')";
 const host = `${meta}.child('host').val() === auth.uid`;
-const member = `(${host} || ${meta}.child('guest').val() === auth.uid)`;
+const seats = ['host', 'guest', 'guest2', 'guest3', 'guest4'];
+const memberFor = (uid) => `(${seats.map((seat) => `${meta}.child('${seat}').val() === ${uid}`).join(' || ')})`;
+const member = memberFor('auth.uid');
 const active = `${meta}.child('open').val() === true && ${meta}.child('leaseEnd').val() > now`;
 const read = `${allowed} && ${member}`;
 const write = `${read} && ${active}`;
@@ -39,7 +42,7 @@ const config = {
   version: num(1, 1e15),
   $other: { ".validate": false },
 };
-const guestReady = `root.child('rooms').child($slot).child('ready').child(${meta}.child('guest').val()).isNumber() && root.child('rooms').child($slot).child('ready').child(${meta}.child('guest').val()).val() > 0`;
+const guestReady = `${meta}.hasChild('guest') && ` + seats.slice(1).map((seat) => `(!${meta}.hasChild('${seat}') || (root.child('rooms').child($slot).child('ready').child(${meta}.child('${seat}').val()).isNumber() && root.child('rooms').child($slot).child('ready').child(${meta}.child('${seat}').val()).val() > 0))`).join(' && ');
 const endedState = (snapshot) => `(${snapshot}.child('phase').val() === 'finished' || (${snapshot}.child('phase').val() === 'reveal' && ${snapshot}.child('round').val() >= ${snapshot}.child('config').child('rounds').val()))`;
 const decision = "newData.parent().child('postGame')";
 const hostEncore = `${endedState('data')} && ${decision}.child('choice').val() === 'again' && ${decision}.child('gameId').val() === data.child('id').val() && ${decision}.child('nextId').val() === newData.child('id').val() && newData.child('game').val() === data.child('game').val()`;
@@ -77,13 +80,13 @@ const state = {
   scores: {
     ".validate": "newData.numChildren() === 2",
     $uid: {
-      ".validate": `($uid === ${meta}.child('host').val() || $uid === ${meta}.child('guest').val()) && newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000`,
+      ".validate": `${memberFor('$uid')} && newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000`,
     },
   },
   boards: {
     ".validate": "newData.numChildren() <= 2",
     $uid: {
-      ".validate": `($uid === ${meta}.child('host').val() || $uid === ${meta}.child('guest').val()) && newData.hasChild('masks')`,
+      ".validate": `${memberFor('$uid')} && newData.hasChild('masks')`,
       masks: {
         ".validate":
           "newData.numChildren() >= 3 && newData.numChildren() <= 12",
@@ -245,7 +248,7 @@ const rules = {
         ".validate": "newData.numChildren() <= 2",
         $uid: {
           ".write": `${write} && auth.uid === $uid`,
-          ".validate": `($uid === ${meta}.child('host').val() || $uid === ${meta}.child('guest').val()) && newData.hasChild('name')`,
+          ".validate": `${memberFor('$uid')} && newData.hasChild('name')`,
           name: str(24),
           $other: { ".validate": false },
         },
@@ -262,7 +265,7 @@ const rules = {
         ".validate": "newData.numChildren() <= 2",
         $uid: {
           ".write": `${read} && auth.uid === $uid`,
-          ".validate": `($uid === ${meta}.child('host').val() || $uid === ${meta}.child('guest').val()) && newData.numChildren() <= 3`,
+          ".validate": `${memberFor('$uid')} && newData.numChildren() <= 3`,
           $connection: { ".validate": "newData.val() === true" },
         },
       },
@@ -311,6 +314,7 @@ const rules = {
     },
   },
 };
+multiplayerRules(rules, { state, meta, host, member, memberFor, allowed, active, read, write, matchState, sameConfig, str, num, bool, seats });
 // Realtime Database rules have no child-count method. Bound collections by key
 // and reject unknown keys, so payload limits are enforced on the server.
 function removeCounts(node) {
@@ -329,8 +333,7 @@ const indexRule = (node, key, pattern) => {
     ".validate": `${key}.matches(${pattern}) && (${node[key][".validate"] || "true"})`,
   };
 };
-state.players["0"] = str(128);
-state.players["1"] = str(128);
+for (const index of [0, 1, 2, 3, 4]) state.players[index] = str(128);
 state.players.$other = { ".validate": false };
 for (const key of ["masks", "solved", "letters", "guesses", "guessCounts", "answers"])
   indexRule(state.boards.$uid[key], "$index", "/^([0-9]|10|11)$/");
@@ -342,7 +345,7 @@ rules.secrets.$slot.$uid.words[".validate"] =
   "newData.hasChildren(['0','1','2'])";
 state.boards.$uid.masks[".validate"] = "newData.hasChildren(['0','1','2'])";
 rules.rooms.$slot.ready.$uid[".validate"] +=
-  ` && ($uid === ${meta}.child('host').val() || $uid === ${meta}.child('guest').val())`;
+  ` && ${memberFor('$uid')}`;
 rules.rooms.$slot.presence.$uid.$connection[".validate"] +=
   " && ($connection === '0' || $connection === '1' || $connection === '2')";
 writeFileSync(

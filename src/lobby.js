@@ -9,4 +9,5 @@ export const lobbyStartUpdate = (base, settings, players, id) => ({
   [`${base}/gameChange`]: null,
   [`${base}/postGame`]: null,
   [`roundAudio/${base.split('/')[1]}`]: null,
+  [`submissions/${base.split('/')[1]}`]: null,
 });

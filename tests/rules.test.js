@@ -292,16 +292,15 @@ test("actual invite flow admits a fresh anonymous client, saves its nickname, an
     joinRoom(anonymous("fresh-guest"), "2ABCDEFG", "fresh-guest", "Sam again"),
   );
   await assertSucceeds(joinRoom(hostDb, "2ABCDEFG", "invite-host", "Host"));
-  await assert.rejects(
-    joinRoom(anonymous("third-guest"), "2ABCDEFG", "third-guest", "Third"),
-    /full, closed, or the code is incorrect/,
-  );
+  for (const uid of ['third-guest', 'fourth-guest', 'fifth-guest'])
+    await assertSucceeds(joinRoom(anonymous(uid), '2ABCDEFG', uid, uid));
+  await assert.rejects(joinRoom(anonymous('sixth-guest'), '2ABCDEFG', 'sixth-guest', 'Sixth'), /full/);
 });
 test("actual invite flow rejects wrong codes and anonymous reserved-room entry", async () => {
   await set(ref(h(), "rooms/2/meta"), meta("host", "2"));
   await assert.rejects(
     joinRoom(anonymous("wrong-code"), "2ZZZZZZZ", "wrong-code", "Sam"),
-    /full, closed, or the code is incorrect/,
+    /full, playing a game, closed, or the code is incorrect/,
   );
   assert.equal((await get(ref(h(), "rooms/2/meta/guest"))).val(), null);
   await set(
@@ -310,7 +309,7 @@ test("actual invite flow rejects wrong codes and anonymous reserved-room entry",
   );
   await assert.rejects(
     joinRoom(anonymous("public-guest"), "0ABCDEFG", "public-guest", "Sam"),
-    /full, closed, or the code is incorrect/,
+    /full, playing a game, closed, or the code is incorrect/,
   );
 });
 
@@ -579,4 +578,198 @@ test('post-game actions cannot be used mid-game or to silently switch game type'
   await env.withSecurityRulesDisabled(async (c) => set(ref(c.database(), 'rooms/1/state/phase'), 'guess'));
   await assertFails(update(ref(h()), postGameUpdate('rooms/1', state, 'lobby')));
   await assertFails(update(ref(h()), postGameUpdate('rooms/1', state, 'again', 'too-early')));
+});
+
+async function groupStart(game = 'wheel', count = 5, rounds = 5) {
+  const players = ['host','guest','third','fourth','fifth'].slice(0,count);
+  for(const uid of players.slice(2)) {
+    await joinRoom(anonymous(uid), '1ABCDEFG', uid, uid);
+    await set(ref(anonymous(uid), `rooms/1/ready/${uid}`),1);
+  }
+  const settings={...DEFAULT_SETTINGS,game,rounds,wordCount:3};
+  await update(ref(h()),lobbyStartUpdate('rooms/1',settings,players,'party-match'));
+  return (await get(ref(h(),'rooms/1/state'))).val();
+}
+async function groupPhase(s, phase, extra = {}) {
+  const next={...s,...extra,phase,revision:s.revision+1};
+  await set(ref(anonymous(s.giver),'rooms/1/state'),next);
+  return next;
+}
+const partyRecordPath=(s,uid)=>`submissions/1/${s.id}/${s.round}/${uid}`;
+const partyRecord=(value,hint=0)=>({entries:{0:{value,hint}}});
+
+test('five seats are unique, concurrent invite joins are safe, and a sixth is denied', async () => {
+  await Promise.all(['third','fourth','fifth'].map((uid)=>joinRoom(anonymous(uid),'1ABCDEFG',uid,uid)));
+  const saved=(await get(ref(h(),'rooms/1/meta'))).val();
+  assert.equal(new Set([saved.host,saved.guest,saved.guest2,saved.guest3,saved.guest4]).size,5);
+  await assert.rejects(joinRoom(outsider(),'1ABCDEFG','stranger','Sixth'),/full/);
+  await assertFails(update(ref(g(),'rooms/1/meta'),{guest2:'guest',joinCode:'1ABCDEFG'}));
+  await assertFails(set(ref(h(),'rooms/1/meta/guest5'),'sixth'));
+  await assertFails(set(ref(h(),'rooms/1/players/stranger'),{name:'Sixth'}));
+  const newcomer=anonymous(saved.guest4);
+  await assertSucceeds(set(ref(newcomer,`rooms/1/presence/${saved.guest4}/2`),true));
+  await assertFails(set(ref(newcomer,`rooms/1/presence/${saved.guest4}/3`),true));
+});
+test('all occupied guests must be ready; mid-game joining is blocked but rejoining works', async () => {
+  await joinRoom(anonymous('third'),'1ABCDEFG','third','Third');
+  const config={...DEFAULT_SETTINGS};
+  await assertFails(update(ref(h()),lobbyStartUpdate('rooms/1',config,['host','guest','third'],'start')));
+  await set(ref(anonymous('third'),'rooms/1/ready/third'),1);
+  await assertSucceeds(update(ref(h()),lobbyStartUpdate('rooms/1',config,['host','guest','third'],'start')));
+  await assert.rejects(joinRoom(anonymous('fourth'),'1ABCDEFG','fourth','Fourth'),/playing a game/);
+  await assertSucceeds(joinRoom(anonymous('third'),'1ABCDEFG','third','Third again'));
+  assert.equal((await get(ref(anonymous('third'),'rooms/1/state'))).val().id,'start');
+});
+test('party wheel guesses are private and immutable until reveal; role forgery and stale reads fail', async () => {
+  const {settleParty}=await import('../src/party.js');
+  let s=await groupStart();
+  const secret={gameId:s.id,round:1,target:50};
+  await set(ref(h(),'secrets/1/host'),secret);
+  s=await groupPhase(s,'clue');s=await groupPhase(s,'guess',{clue:'Pikachu'});
+  const records={};
+  for(const [index,uid] of s.players.slice(1).entries()) {
+    records[uid]=partyRecord(50+index*3);
+    await assertSucceeds(set(ref(anonymous(uid),partyRecordPath(s,uid)),records[uid]));
+  }
+  await assertFails(remove(ref(h(),'submissions/1')));
+  await assertSucceeds(get(ref(h(),partyRecordPath(s,'third'))));
+  await assertFails(get(ref(g(),partyRecordPath(s,'third'))));
+  await assertFails(get(ref(g(),`submissions/1/${s.id}/${s.round}`)));
+  await assertFails(set(ref(g(),partyRecordPath(s,'guest')),partyRecord(30)));
+  await assertFails(remove(ref(g(),partyRecordPath(s,'guest'))));
+  await assertFails(set(ref(g(),partyRecordPath(s,'third')),partyRecord(30)));
+  await assertFails(set(ref(g(),'rooms/1/state'),{...s,giver:'guest'}));
+  await assertFails(set(ref(h(),'rooms/1/state'),{...s,giver:'guest'}));
+  await assertFails(set(ref(g(),'rooms/1/state'),{...s,phase:'reveal'}));
+  await assertFails(set(ref(h(),'rooms/1/state'),{...s,game:'chain'}));
+  assert.equal(JSON.stringify((await get(ref(g(),'rooms/1/state'))).val()).includes('results'),false);
+  s=settleParty(s,secret,records);
+  await assertSucceeds(set(ref(h(),'rooms/1/state'),s));
+  assert.equal((await get(ref(g(),'rooms/1/state/results/third/guess'))).val(),53);
+  const old=s; s=nextRound(s);
+  await assertFails(set(ref(h(),'rooms/1/state'),s)); // Must clear private records atomically.
+  await assertSucceeds(update(ref(h()),{'rooms/1/state':s,'submissions/1':null,'roundAudio/1':null}));
+  assert.equal(s.giver,'guest');
+  await assertFails(get(ref(g(),partyRecordPath(old,'third'))));
+  await assertFails(set(ref(anonymous('third'),partyRecordPath(old,'third')),partyRecord(22)));
+});
+test('five-player clue guesses enforce per-hint bounds and reveal only when all players finish', async () => {
+  const {settleParty,partyHint}=await import('../src/party.js');
+  let s=await groupStart('clues');
+  const secret={gameId:s.id,round:1,word:'banana'};
+  await set(ref(h(),'secrets/1/host'),secret);
+  s=await groupPhase(s,'hint');s=partyHint(s,'yellow');
+  await assertSucceeds(set(ref(h(),'rooms/1/state'),s));
+  const records={};
+  for(const uid of s.players.slice(1)) {
+    records[uid]=partyRecord(uid==='guest'?'banana':'lemon',1);
+    await assertSucceeds(set(ref(anonymous(uid),partyRecordPath(s,uid)),records[uid]));
+    await assertFails(set(ref(anonymous(uid),`${partyRecordPath(s,uid)}/entries/1`),{value:'apple',hint:1}));
+  }
+  s=settleParty(s,secret,records);await set(ref(h(),'rooms/1/state'),s);
+  assert.equal(s.progress.guest.done,true);
+  await assertFails(set(ref(g(),`${partyRecordPath(s,'guest')}/entries/1`),{value:'banana',hint:1}));
+  for(const uid of s.players.slice(2)) {
+    records[uid].entries[1]={value:'apple',hint:1};
+    await assertSucceeds(set(ref(anonymous(uid),partyRecordPath(s,uid)),records[uid]));
+  }
+  s=settleParty(s,secret,records);await set(ref(h(),'rooms/1/state'),s);assert.equal(s.phase,'hint');
+  s=partyHint(s,'peel');await set(ref(h(),'rooms/1/state'),s);
+  for(const uid of s.players.slice(2)) {
+    records[uid].entries[2]={value:'banana',hint:2};
+    await assertSucceeds(set(ref(anonymous(uid),partyRecordPath(s,uid)),records[uid]));
+  }
+  s=settleParty(s,secret,records);await assertSucceeds(set(ref(h(),'rooms/1/state'),s));
+  assert.equal(s.phase,'reveal');assert.equal(s.scores.guest,3);assert.equal(s.scores.fifth,2);
+});
+test('group audio permits three listens per person, one private guess, and separate verdicts', async () => {
+  const {settleParty,judgePartyReverse,nextListen}=await import('../src/party.js');
+  let s=await groupStart('reverse',5,1);
+  const secret={gameId:s.id,round:1,word:'banana'};
+  await set(ref(h(),'secrets/1/host'),secret);
+  s=await groupPhase(s,'recording',{recorded:true});
+  const data=toBase64(reverseWav([new Float32Array(1200).fill(.1)],12000));
+  await set(ref(h(),'roundAudio/1'),{roomCode:'1ABCDEFG',gameId:s.id,round:1,owner:'host',data});
+  s=await groupPhase(s,'guess');
+  const records={};
+  for(const uid of s.players.slice(1)) {
+    records[uid]=null;
+    for(let play=0;play<3;play++){
+      records[uid]=nextListen(records[uid]);
+      await assertSucceeds(set(ref(anonymous(uid),partyRecordPath(s,uid)),records[uid]));
+    }
+    await assertFails(set(ref(anonymous(uid),`${partyRecordPath(s,uid)}/plays`),4));
+    await assertFails(set(ref(anonymous(uid),`${partyRecordPath(s,uid)}/plays`),0));
+    records[uid]={...records[uid],...partyRecord(uid==='guest'?' BANANA ':'bananna')};
+    await assertSucceeds(set(ref(anonymous(uid),partyRecordPath(s,uid)),records[uid]));
+    await assertFails(set(ref(anonymous(uid),`${partyRecordPath(s,uid)}/entries/1`),{value:'banana',hint:0}));
+  }
+  s=settleParty(s,secret,records);await set(ref(h(),'rooms/1/state'),s);
+  assert.equal(s.scores.guest,1);
+  for(const uid of s.players.slice(2)){
+    s=judgePartyReverse(s,secret,records,uid,true);
+    await assertSucceeds(set(ref(h(),'rooms/1/state'),s));
+  }
+  assert.equal(s.phase,'reveal');assert.equal(s.scores.fifth,1);
+  await assertSucceeds(update(ref(h()),postGameUpdate('rooms/1',s,'again','encore')));
+});
+test('group game-change requires unanimous votes and rejects forged consent', async () => {
+  const s=await groupStart();
+  await requestGameChange(g(),'rooms/1',s.id,'guest',s.players);
+  let request=(await get(ref(h(),'rooms/1/gameChange'))).val();
+  await assertFails(set(ref(g(),'rooms/1/gameChange/votes/third'),true));
+  await assertFails(update(ref(g(),'rooms/1/gameChange'),{accepted:true}));
+  for(const uid of ['host','third','fourth']) {
+    await respondToGameChange(anonymous(uid),'rooms/1',request,uid,true,s.players);
+    request=(await get(ref(h(),'rooms/1/gameChange'))).val();
+    assert.equal(request.accepted,false);
+  }
+  await assertFails(completeGameChange(h(),'rooms/1',request));
+  await respondToGameChange(anonymous('fifth'),'rooms/1',request,'fifth',true,s.players);
+  request=(await get(ref(h(),'rooms/1/gameChange'))).val();assert.equal(request.accepted,true);
+  await assertSucceeds(completeGameChange(h(),'rooms/1',request));
+  assert.equal((await get(ref(g(),'rooms/1/state'))).val(),null);
+});
+test('five concurrent word chains remain private, then race around the room and reveal at the end', async () => {
+  let s=await groupStart('chain');
+  const words=['coffee','shop','window'];
+  await Promise.all(s.players.map(async(uid)=>{
+    await set(ref(anonymous(uid),`secrets/1/${uid}`),{gameId:s.id,round:1,words});
+    await assertSucceeds(runTransaction(ref(anonymous(uid),'rooms/1/state'),(current)=>current?{
+      ...current,boards:{...current.boards,[uid]:{masks:chainMasks(words)}},revision:current.revision+1,
+    }:null,{applyLocally:false}));
+  }));
+  s=(await get(ref(h(),'rooms/1/state'))).val();
+  assert.equal(Object.keys(s.boards).length,5);
+  await assertFails(get(ref(anonymous('third'),'secrets/1/fourth')));
+  s={...s,phase:'guess'};await set(ref(h(),'rooms/1/state'),s);
+  for(const uid of s.players){
+    const owner=s.players[(s.players.indexOf(uid)+1)%5];
+    s={...s,phase:'pending',pending:{actor:uid,kind:'guess',index:0,value:'wrong'}};
+    await set(ref(anonymous(uid),'rooms/1/state'),s);
+    s=resolve(s,{gameId:s.id,round:1,words});await assertSucceeds(set(ref(anonymous(owner),'rooms/1/state'),s));
+  }
+  assert.equal(s.turn,'host');
+  for(let index=0;index<words.length;index++){
+    s={...s,phase:'pending',pending:{actor:'host',kind:'guess',index,value:words[index]}};
+    await set(ref(h(),'rooms/1/state'),s);
+    s=resolve(s,{gameId:s.id,round:1,words});await set(ref(g(),'rooms/1/state'),s);
+  }
+  assert.equal(s.phase,'finished');
+  for(const uid of s.players){
+    s=revealChain(s,{gameId:s.id,round:1,words},uid);
+    await assertSucceeds(set(ref(anonymous(uid),'rooms/1/state'),s));
+  }
+  assert.deepEqual((await get(ref(anonymous('fifth'),'rooms/1/state/boards/third/answers'))).val(),words);
+});
+test('any group member can pause safely while host and giver are away, without changing progress', async () => {
+  let s=await groupStart('clues');s=await groupPhase(s,'hint');
+  const {partyHint}=await import('../src/party.js');s=partyHint(s,'yellow');await set(ref(h(),'rooms/1/state'),s);
+  const paused={...s,pausedAt:Date.now(),revision:s.revision+1};
+  await assertFails(set(ref(anonymous('fifth'),'rooms/1/state'),{...paused,progress:{...paused.progress,guest:{...paused.progress.guest,correct:true,points:3,done:true}}}));
+  await assertFails(set(ref(anonymous('fifth'),'rooms/1/state'),{...paused,hints:['banana']}));
+  await assertSucceeds(set(ref(anonymous('fifth'),'rooms/1/state'),paused));
+  const resumed={...paused,deadline:Date.now()+30000};delete resumed.pausedAt;
+  await assertFails(set(ref(anonymous('fifth'),'rooms/1/state'),resumed));
+  await assertSucceeds(set(ref(h(),'rooms/1/state'),resumed));
 });

@@ -106,6 +106,7 @@ export async function createRoom(uid, name, reserved = false, game = "wheel") {
       [`${base}/presence`]: null,
       [`secrets/${slot}`]: null,
       [`roundAudio/${slot}`]: null,
+      [`submissions/${slot}`]: null,
     });
     return code;
   }

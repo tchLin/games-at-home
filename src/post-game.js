@@ -12,5 +12,6 @@ export function postGameUpdate(base, state, choice, nextId) {
     [`${base}/ready`]: null,
     [`${base}/gameChange`]: null,
     [`roundAudio/${base.split('/')[1]}`]: null,
+  [`submissions/${base.split('/')[1]}`]: null,
   };
 }

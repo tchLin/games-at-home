@@ -8,7 +8,9 @@ export const normalize = (value) =>
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
-export const other = (s, uid) => s.players.find((p) => p !== uid);
+export const other = (s, uid) => s.players[(s.players.indexOf(uid) + 1) % s.players.length];
+export const previousPlayer = (s, uid) => s.players[(s.players.indexOf(uid) + s.players.length - 1) % s.players.length];
+export const isParty = (s) => s.players.length > 2 && s.game !== "chain";
 export const deadline = (s, now) =>
   s.config.timer ? now + s.config.timer * 1000 : 0;
 export const maskWord = (word, count = 1) =>
@@ -22,7 +24,7 @@ export function revealChain(s, secret, uid) {
   return { ...s, boards: { ...s.boards, [uid]: { ...s.boards[uid], answers: [...secret.words] } } };
 }
 export function newRound(s, now = Date.now()) {
-  const giver = s.players[(s.round - 1) % 2];
+  const giver = s.round === 1 ? s.players[0] : other(s, s.giver);
   const common = {
     id: s.id,
     game: s.game,
@@ -34,6 +36,7 @@ export function newRound(s, now = Date.now()) {
     phase: "prepare",
     deadline: 0,
     revision: (s.revision || 0) + 1,
+    ...(isParty(s) ? { progress: Object.fromEntries(s.players.filter((p) => p !== giver).map((p) => [p, { count: 0, used: 0, done: false, correct: false, points: 0 }])) } : {}),
   };
   if (s.game === "wheel") {
     return {
@@ -75,6 +78,7 @@ export function encore(s, id, now = Date.now()) {
   if (s.game === 'chain') next.turn = other(s, s.winner || s.turn);
   else {
     next.giver = other(s, s.giver);
+    if (isParty(next)) next.progress = Object.fromEntries(next.players.filter((p) => p !== next.giver).map((p) => [p, { count: 0, used: 0, done: false, correct: false, points: 0 }]));
     next.scores = { ...s.scores };
   }
   return next;
@@ -142,7 +146,7 @@ export function resolve(s, secret, now = Date.now()) {
               : `“${p.value}” wasn’t it. The turn passes over.`,
         kind: "neutral",
       };
-      next.turn = owner;
+      next.turn = other(s, p.actor);
     }
     const complete = Object.keys(board.solved).length === secret.words.length;
     next.phase = complete ? "finished" : "guess";

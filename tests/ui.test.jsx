@@ -346,9 +346,9 @@ describe("flexible lobby readiness", () => {
   });
   it("prevents Start while the guest is unready or disconnected", () => {
     const { rerender } = render(<Lobby {...base} uid="host" isHost settings={DEFAULT_SETTINGS} />);
-    expect(screen.getByRole("button", { name: /Waiting for guest/ }).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: /Waiting for everyone to be ready/ }).disabled).toBe(true);
     rerender(<Lobby {...base} uid="host" isHost room={{ ...room, ready: { guest: 1 } }} settings={DEFAULT_SETTINGS} bothOnline={false} />);
-    expect(screen.getByRole("button", { name: /Waiting for both/ }).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: /Waiting for everyone…/ }).disabled).toBe(true);
   });
 });
 
@@ -614,4 +614,110 @@ it('offers the host another round or game selection immediately after the last r
   expect(screen.queryByRole('button', { name: 'One more round' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Back to game selection' })).toBeNull();
   expect(screen.getByText(/Your host can start one more round/)).toBeTruthy();
+});
+
+describe('group games', () => {
+  const players = ['host','guest','third','fourth','fifth'];
+  const group = (game = 'wheel', uid = 'host') => ({ ...props(game), uid,
+    name: (id) => id, isHost: uid === 'host', submissions: {},
+    room: { meta: { host: 'host', guest: 'guest', guest2: 'third', guest3: 'fourth', guest4: 'fifth', code:'1ABCDEFG' },
+      state: newGame({...DEFAULT_SETTINGS,game},players,'group-ui') } });
+  it('starts all five players only when every occupied guest seat is ready', () => {
+    const p=group(); const room={...p.room,ready:{guest:1,third:1,fourth:1,fifth:0}};
+    const {rerender}=render(<Lobby {...p} room={room} settings={DEFAULT_SETTINGS} />);
+    expect(screen.getByRole('button',{name:/Waiting for everyone to be ready/}).disabled).toBe(true);
+    room.ready.fifth=1;
+    rerender(<Lobby {...p} room={room} settings={DEFAULT_SETTINGS} />);
+    fireEvent.click(screen.getByRole('button',{name:/Start game/}));
+    expect(update.mock.calls.at(-1)[1]['rooms/1/state'].players).toEqual(players);
+  });
+  it('submits wheel guesses privately and hides the form once locked', async () => {
+    const p=group('wheel','third');p.room.state={...p.room.state,phase:'guess',clue:'Pikachu'};
+    const {rerender}=render(<Game {...p} />);
+    fireEvent.click(screen.getByRole('button',{name:/Lock in my guess/}));
+    await waitFor(()=>expect(runTransaction).toHaveBeenCalled());
+    const [path,fn]=runTransaction.mock.calls.at(-1);
+    expect(path).toBe('submissions/1/group-ui/1/third');
+    expect(fn(null).entries[0].value).toBe(50);
+    expect(p.mutate).not.toHaveBeenCalled();
+    p.submissions={third:{entries:{0:{value:50,hint:0}}}};
+    rerender(<Game {...p} />);
+    expect(screen.queryByRole('button',{name:/Lock in my guess/})).toBeNull();
+  });
+  it('shows a guesser only their own history, and gives the recorder individual verdict buttons', () => {
+    const p=group('reverse','host');p.room.state={...p.room.state,phase:'guess',recorded:true};
+    p.secret={gameId:'group-ui',round:1,word:'banana'};
+    p.submissions={guest:{entries:{0:{value:'bananna',hint:0}}},third:{entries:{0:{value:'apple',hint:0}}}};
+    const {rerender}=render(<Game {...p} />);
+    expect(screen.getByRole('button',{name:'Pass · guest'})).toBeTruthy();
+    expect(screen.getByRole('button',{name:'No pass · third'})).toBeTruthy();
+    rerender(<Game {...p} uid="guest" isHost={false} secret={null} submissions={{guest:p.submissions.guest}} />);
+    expect(screen.queryByText('apple')).toBeNull();
+    expect(screen.getByText('bananna')).toBeTruthy();
+    expect(screen.queryByRole('button',{name:'Pass · guest'})).toBeNull();
+    expect(screen.queryByLabelText('Your one guess')).toBeNull();
+  });
+  it('keeps solved clue guessers out while the remaining players can continue', () => {
+    const p=group('clues','guest');p.room.state={...p.room.state,phase:'guess',hintIndex:1,hints:['yellow']};
+    p.room.state.progress.guest={count:1,used:1,done:true,correct:true,points:3};
+    const {rerender}=render(<Game {...p} />);
+    expect(screen.queryByRole('button',{name:'Take a guess'})).toBeNull();
+    expect(screen.getByText(/You found it! Waiting/)).toBeTruthy();
+    rerender(<Game {...p} uid="third" />);
+    expect(screen.getByRole('button',{name:'Take a guess'})).toBeTruthy();
+    expect(screen.getByLabelText('2 guesses left for this hint')).toBeTruthy();
+  });
+  it('animates the wheel without showing the target, then reveals it only to the giver', async () => {
+    vi.useFakeTimers();
+    try {
+      const p=group();
+      const {rerender,container}=render(<Game {...p} />);
+      await reactAct(async()=>fireEvent.click(screen.getByRole('button',{name:/Spin the wheel/})));
+      expect(container.querySelector('.wheel-spin-disc')).toBeTruthy();
+      p.secret={gameId:'group-ui',round:1,target:73};p.room.state={...p.room.state,phase:'clue'};
+      rerender(<Game {...p} />);
+      expect(screen.queryByText('73/100')).toBeNull();
+      await reactAct(async()=>vi.advanceTimersByTime(1600));
+      expect(container.querySelector('.wheel-spin-disc')).toBeNull();
+      expect(screen.getByText('73/100')).toBeTruthy();
+      rerender(<Game {...p} uid="guest" secret={null} isHost={false} />);
+      expect(screen.queryByText('73/100')).toBeNull();
+      expect(screen.getByRole('img',{name:'The scoring band is hidden'})).toBeTruthy();
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+it('waits for all private submission snapshots before resolving an expired group round', async () => {
+  const listeners=new Map();
+  onValue.mockImplementation((path,callback)=>{listeners.set(path,callback);return()=>{};});
+  presence.mockImplementation((code,uid,callback)=>{callback(true);return()=>{};});
+  const players=['host','guest','third','fourth','fifth'];
+  let state={...newGame({...DEFAULT_SETTINGS,game:'wheel'},players,'snapshot-match'),phase:'guess',deadline:1,clue:'Pikachu'};
+  runTransaction.mockImplementation(async(path,fn)=>{
+    if(path!=='rooms/1/state')return {committed:false};
+    const next=fn(state);if(!next)return {committed:false};
+    state=next;listeners.get(path)?.({val:()=>state});return {committed:true};
+  });
+  const report=vi.fn();
+  const {unmount}=renderHook(()=>useRoom('1ABCDEFG','host',report));
+  try {
+    reactAct(()=>{
+      listeners.get('rooms/1/meta')({val:()=>({host:'host',guest:'guest',guest2:'third',guest3:'fourth',guest4:'fifth',code:'1ABCDEFG',open:true,leaseEnd:Date.now()+60000})});
+      listeners.get('rooms/1/presence')({val:()=>Object.fromEntries(players.map(p=>[p,{0:true}]))});
+      listeners.get('rooms/1/state')({val:()=>state});
+      listeners.get('secrets/1/host')({val:()=>({gameId:state.id,round:1,target:50})});
+    });
+    await waitFor(()=>expect(listeners.has('submissions/1/snapshot-match/1/fifth')).toBe(true));
+    reactAct(()=>{
+      listeners.get('submissions/1/snapshot-match/1/guest')({val:()=>({entries:{0:{value:50,hint:0}}})});
+      listeners.get('submissions/1/snapshot-match/1/third')({val:()=>null});
+      listeners.get('submissions/1/snapshot-match/1/fourth')({val:()=>null});
+    });
+    expect(state.phase).toBe('guess');
+    reactAct(()=>listeners.get('submissions/1/snapshot-match/1/fifth')({val:()=>null}));
+    await waitFor(()=>expect(state.phase).toBe('reveal'),{timeout:2000});
+    expect(state.scores.guest).toBe(4);expect(report).not.toHaveBeenCalled();
+  } finally {
+    unmount();onValue.mockImplementation(()=>()=>{});presence.mockImplementation(()=>()=>{});
+  }
 });

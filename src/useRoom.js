@@ -13,11 +13,17 @@ import {
   slotOf,
 } from "./firebase.js";
 import { completeGameChange } from "./game-change.js";
-import { resolve, other, deadline, revealChain } from "./engine.js";
+import { resolve, other, deadline, revealChain, isParty } from "./engine.js";
 import { chooseReverseWord, reverseWordAssignment, isExactReverseGuess } from './reverse-game.js';
+import { isPermissionDenied } from "./rooms.js";
+import { members } from "./players.js";
+import { settleParty, submissionPath } from "./party.js";
 export function useRoom(code, uid, onError) {
   const [room, setRoom] = useState({});
   const [secret, setSecret] = useState(null);
+  const [submissionState, setSubmissionState] = useState({});
+  const submissionKey = `${room.state?.id}/${room.state?.round}/${room.state?.giver}`;
+  const submissions = submissionState.key === submissionKey ? submissionState.records : {};
   const [connected, setConnected] = useState(false);
   const [offset, setOffset] = useState(0);
   const [tick, setTick] = useState(Date.now());
@@ -66,11 +72,23 @@ export function useRoom(code, uid, onError) {
     Promise.resolve(remove(ref(db, `roundAudio/${slotOf(code)}`))).catch(() => {});
   }, [isHost, connected, code, room.state?.id, room.state?.round]);
   const valid = room.meta?.code === code && room.meta?.open;
-  const bothOnline = Boolean(
-    room.meta?.guest &&
-    room.presence?.[room.meta.host] &&
-    room.presence?.[room.meta.guest],
-  );
+  const roster = room.state?.players || members(room.meta);
+  const bothOnline = roster.length >= 2 && roster.every((p) => Boolean(room.presence?.[p]));
+  useEffect(() => {
+    const s = room.state;
+    setSubmissionState({ key: submissionKey, records: {} });
+    if (!s || !isParty(s)) return;
+    const readers = s.giver === uid ? s.players.filter((p) => p !== uid) : [uid];
+    return (() => {
+      let alive = true;
+      const off = readers.map((p) => onValue(ref(db, submissionPath(base, s, p)),
+        (snapshot) => alive && setSubmissionState((all) => ({ key: submissionKey, records: { ...(all.key === submissionKey ? all.records : {}), [p]: snapshot.val() } })),
+        (error) => { // Old-round subscriptions lose access when the host advances.
+          if (!isPermissionDenied(error)) onError(error);
+        }));
+      return () => { alive = false; off.forEach((f) => f()); };
+    })();
+  }, [room.state?.id, room.state?.round, room.state?.giver, uid, base]);
   const mutate = useCallback(
     async (fn, expected) => {
       const result = await runTransaction(
@@ -156,6 +174,13 @@ export function useRoom(code, uid, onError) {
         );
         return;
       }
+      if (isParty(s)) {
+        if (s.giver === uid && mySecret && s.players.filter((p) => p !== uid).every((p) => Object.hasOwn(submissions, p))) {
+          const next = settleParty(s, mySecret, submissions, now);
+          if (next) await mutate(() => next, s);
+        }
+        return;
+      }
       const judge = s.game === "chain" ? other(s, s.pending?.actor) : s.giver;
       if (s.phase === "pending" && judge === uid && mySecret && (s.game !== 'reverse' || s.pending?.kind === 'timeout' || isExactReverseGuess(s, mySecret))) {
         await mutate((v) => resolve(v, mySecret, now), s);
@@ -189,6 +214,7 @@ export function useRoom(code, uid, onError) {
   }, [
     room.state,
     secret,
+    submissions,
     valid,
     connected,
     bothOnline,
@@ -200,6 +226,7 @@ export function useRoom(code, uid, onError) {
   return {
     room,
     secret,
+    submissions,
     now,
     isHost,
     valid,

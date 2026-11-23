@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { Mic, Play, Square, Check, X } from 'lucide-react';
-import { db, ref, set, get } from './firebase.js';
+import { db, ref, set, get, runTransaction } from './firebase.js';
 import { Button, Field, Tag, Notice } from './App.jsx';
-import { deadline, judgeReverse } from './engine.js';
+import { deadline, judgeReverse, isParty } from './engine.js';
 import { pronunciationUrl } from './reverse-words.js';
 import { isExactReverseGuess } from './reverse-game.js';
 import { RECORD_SECONDS, audioContext, audioSession, resumeAudio, requireRunning, decode, playBuffer, microphone, reverseWav, toBase64, fromBase64 } from './reverse-audio.js';
+import { submissionPath, nextListen, judgePartyReverse } from './party.js';
 import { sounds } from './sound.js';
 
-export default function ReverseGame({ room, s, secret, uid, name, disabled, mutate, act, now, base, send }) {
+export default function ReverseGame({ room, s, secret, uid, name, disabled, mutate, act, now, base, send, submissions = {} }) {
   const [guess, setGuess] = useState('');
   const [recording, setRecording] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -16,6 +17,9 @@ export default function ReverseGame({ room, s, secret, uid, name, disabled, muta
   const [elapsed, setElapsed] = useState(0);
   const resources = useRef({ alive: true });
   const giver = s.giver === uid;
+  const party = isParty(s);
+  const plays = party ? submissions[uid]?.plays || 0 : s.plays;
+  const submitted = party && (s.progress[uid]?.done || submissions[uid]?.entries?.[0]);
   const audioPath = `roundAudio/${base.split('/')[1]}`;
   useEffect(() => {
     const r = resources.current;
@@ -66,7 +70,7 @@ export default function ReverseGame({ room, s, secret, uid, name, disabled, muta
       buffer = r.clip;
       if (!r.alive) return;
       requireRunning(ctx); // Don't spend a listen if loading was interrupted.
-      const claimed = await mutate((v) => v.id === s.id && v.round === s.round && v.phase === 'guess' && v.plays < 3
+      const claimed = party ? (await runTransaction(ref(db, submissionPath(base, s, uid)), nextListen, { applyLocally: false })).committed : await mutate((v) => v.id === s.id && v.round === s.round && v.phase === 'guess' && v.plays < 3
         ? { ...v, plays: v.plays + 1 } : null);
       if (!claimed) throw Error('No listens remain, or this turn has ended.');
     }
@@ -118,14 +122,14 @@ export default function ReverseGame({ room, s, secret, uid, name, disabled, muta
     if (clip?.gameId !== s.id || clip.round !== s.round) throw Error('No saved recording. Use Skip round to continue.');
     await mutate((v) => v.phase === 'recording' ? { ...v, phase: 'guess', deadline: deadline(v, now) } : null, s);
   });
-  const verdict = (pass, skip = false) => act(() => mutate((v) => judgeReverse(v, secret, pass, skip), s));
+  const verdict = (pass, skip = false) => act(() => mutate((v) => party ? judgePartyReverse(v, secret, submissions, uid, pass, skip) : judgeReverse(v, secret, pass, skip), s));
   const reveal = s.phase === 'reveal';
   const exact = isExactReverseGuess(s, secret);
   return <div className="reverse-game">
     <div className="stage-title">
       <Tag>{reveal ? 'THE WORD WAS…' : giver ? 'YOU’RE THE VOICE' : 'YOU’RE THE LISTENER'}</Tag>
       <h2>{reveal ? s.result.word : giver ? 'A word, turned around.' : 'Sounds almost familiar.'}</h2>
-      <p>{reveal ? s.result.correct ? 'Pass! One point for the listener.' : 'No point this time. Swap roles next round.'
+      <p>{reveal ? party ? 'The round is complete. Everyone’s results are below.' : s.result.correct ? 'Pass! One point for the listener.' : 'No point this time. Swap roles next round.'
         : giver ? 'Listen to the backwards pronunciation. Imitate it in one recording; we’ll flip your voice for your person.'
         : `${name(s.giver)} is making a backwards recording. You get three listens and one guess.`}</p>
     </div>
@@ -144,9 +148,9 @@ export default function ReverseGame({ room, s, secret, uid, name, disabled, muta
           <Button secondary disabled={disabled} onClick={recover}>Recover saved recording</Button>
           <Button secondary disabled={disabled || !secret?.word} onClick={() => verdict(false, true)}>Skip round</Button></>}
     </div>}
-    {!giver && s.phase === 'guess' && <div className="audio-actions">
-      <Button data-sound="off" disabled={disabled || playing || s.plays >= 3} onClick={() => listen(false)}><Play size={18} />{playing ? 'Playing…' : `Listen · ${3 - s.plays} left`}</Button>
-      <p aria-live="polite">{s.plays} of 3 listens used. One guess. Exact answers pass automatically; your partner can accept a spelling slip.</p>
+    {!giver && s.phase === 'guess' && !submitted && <div className="audio-actions">
+      <Button data-sound="off" disabled={disabled || playing || plays >= 3} onClick={() => listen(false)}><Play size={18} />{playing ? 'Playing…' : `Listen · ${3 - plays} left`}</Button>
+      <p aria-live="polite">{plays} of 3 listens used. One guess. Exact answers pass automatically; your partner can accept a spelling slip.</p>
       <form className="action-form" onSubmit={(event) => { event.preventDefault(); send('guess', guess.trim()); }}>
         <Field label="Your one guess"><input value={guess} onChange={(event) => setGuess(event.target.value)} maxLength={80} required disabled={disabled} placeholder="What word did you hear?" /></Field>
         <Button disabled={disabled || !guess.trim()}>Submit my guess</Button>
@@ -158,7 +162,7 @@ export default function ReverseGame({ room, s, secret, uid, name, disabled, muta
       <div className="form-buttons"><Button disabled={disabled || !secret?.word} onClick={() => verdict(true)}><Check size={18} />Pass</Button>
         <Button secondary disabled={disabled || !secret?.word} onClick={() => verdict(false)}><X size={18} />No pass</Button></div>
     </div> : <Notice>Checking your guess. Exact answers pass automatically; {name(s.giver)} can accept other spellings.</Notice>)}
-    {giver && s.phase === 'guess' && <Notice>Your recording is ready. {name(s.players.find((p) => p !== uid))} has used {s.plays} of 3 listens.</Notice>}
+    {giver && s.phase === 'guess' && <Notice>{party ? 'Your recording is ready for everyone. Each listener gets three plays and one guess.' : <>Your recording is ready. {name(s.players.find((p) => p !== uid))} has used {s.plays} of 3 listens.</>}</Notice>}
     {!giver && ['prepare', 'recording'].includes(s.phase) && <Notice>Waiting for the one-take recording…</Notice>}
   </div>;
 }

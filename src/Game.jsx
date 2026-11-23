@@ -11,9 +11,9 @@ import {
   Trophy,
   Heart,
 } from "lucide-react";
-import { db, ref, set, update } from "./firebase.js";
+import { db, ref, set, update, runTransaction } from "./firebase.js";
 import { GAMES, suggestions } from "./content.js";
-import { other, deadline, nextRound, chainMasks, normalize, gameEnded } from "./engine.js";
+import { other, deadline, nextRound, chainMasks, normalize, gameEnded, isParty, previousPlayer } from "./engine.js";
 import { postGameUpdate } from './post-game.js';
 import { Dial } from "./art.jsx";
 import { spinTarget } from "./wheel.js";
@@ -21,6 +21,8 @@ import { wordSuggestions } from "./word-links.js";
 import { playGameSound } from "./sound.js";
 import { Button, Field, Tag, Notice } from "./App.jsx";
 import ReverseGame from './ReverseGame.jsx';
+import { submissionPath, nextSubmission, partyHint } from './party.js';
+import { PartyStatus } from './PartyStatus.jsx';
 export default function Game(props) {
   const {
     room,
@@ -61,8 +63,13 @@ export default function Game(props) {
     0,
     Math.ceil(((s.deadline || 0) - (s.pausedAt || now)) / 1000),
   );
-  const send = (kind, value, index = 0) =>
-    act(() =>
+  const send = (kind, value, index = 0) => {
+    if (isParty(s)) return act(async () => {
+      const result = await runTransaction(ref(db, submissionPath(base, s, uid)),
+        (current) => nextSubmission(current, s, uid, value), { applyLocally: false });
+      if (!result.committed) throw Error('Your answer is already in, or this turn has ended.');
+    });
+    return act(() =>
       mutate(
         (v) =>
           v.phase === "guess"
@@ -76,6 +83,7 @@ export default function Game(props) {
         s,
       ),
     );
+  };
   return (
     <section className={`play-area ${GAMES[s.game].color}`}>
       <div className="game-heading">
@@ -98,7 +106,7 @@ export default function Game(props) {
       </div>
       {(!bothOnline || s.pausedAt) && s.phase !== "finished" && (
         <Notice>
-          Your game is saved. Waiting for both players to be here before
+          Your game is saved. Waiting for everyone to be here before
           continuing.
         </Notice>
       )}
@@ -161,6 +169,7 @@ export default function Game(props) {
               send={send}
             />
           )}
+          {isParty(s) && <PartyStatus {...props} s={s} secret={mine} disabled={disabled} />}
         </div>
       )}
       {ended ? <div className="post-game-actions">
@@ -173,13 +182,17 @@ export default function Game(props) {
           </div>
           <p>{s.game === 'chain' ? 'Play a fresh word race with the same settings, or choose another game.'
             : 'Keep your points and swap roles for one extra round, or choose another game.'}</p>
-        </> : <Notice>Your host can start one more round or take you both back to game selection.</Notice>}
+        </> : <Notice>Your host can start one more round or take everyone back to game selection.</Notice>}
       </div> : s.phase === "reveal" && (
         <div className="round-footer">
           {isHost ? (
             <Button
               disabled={busy || !bothOnline}
-              onClick={() => act(() => mutate((v) => nextRound(v, now), s))}
+              onClick={() => act(() => update(ref(db), {
+                [`${base}/state`]: nextRound(s, now),
+                [`submissions/${base.split('/')[1]}`]: null,
+                [`roundAudio/${base.split('/')[1]}`]: null,
+              }))}
             >
               One more round
               <ArrowRight size={18} />
@@ -203,12 +216,27 @@ function Wheel({
   act,
   now,
   secretPath,
+  submissions = {},
 }) {
   const [clue, setClue] = useState(""),
     [guess, setGuess] = useState(50);
   const giver = s.giver === uid,
     reveal = s.phase === "reveal";
-  const target = reveal ? s.result.target : giver ? secret?.target : null;
+  const [spinning, setSpinning] = useState(false);
+  const spinTimer = useRef();
+  const beforePhase = useRef(s.phase);
+  useEffect(() => {
+    if (beforePhase.current === 'prepare' && s.phase === 'clue') {
+      setSpinning(true);
+      clearTimeout(spinTimer.current);
+      spinTimer.current = setTimeout(() => setSpinning(false), 1500);
+    }
+    beforePhase.current = s.phase;
+  }, [s.phase]);
+  useEffect(() => () => clearTimeout(spinTimer.current), []);
+  const roundResult = isParty(s) ? s.results?.[uid] : s.result;
+  const locked = isParty(s) && Boolean(submissions?.[uid]?.entries?.[0]);
+  const target = spinning ? null : reveal ? s.result.target : giver ? secret?.target : null;
   const submit = (e) => {
     e.preventDefault();
     act(() =>
@@ -225,6 +253,8 @@ function Wheel({
   };
   const spin = () =>
     act(async () => {
+      setSpinning(true);
+      spinTimer.current = setTimeout(() => setSpinning(false), 1500);
       await set(ref(db, secretPath), {
         gameId: s.id,
         round: s.round,
@@ -245,7 +275,7 @@ function Wheel({
         <h2>
           {reveal
             ? s.result.points >= 3
-              ? "You two get each other."
+              ? "On the same wavelength."
               : "A little closer next time."
             : s.phase === "clue" && giver
               ? "What belongs right here?"
@@ -270,22 +300,23 @@ function Wheel({
       <div className="wheel-panel">
         <Dial
           target={target}
-          guess={reveal && s.result.guess >= 0 ? s.result.guess : guess}
+          spinning={spinning}
+          guess={reveal && roundResult?.guess >= 0 ? roundResult.guess : guess}
           showGuess={
-            reveal ? s.result.guess >= 0 : !giver && s.phase === "guess"
+            reveal ? roundResult?.guess >= 0 : !giver && s.phase === "guess"
           }
         />
         <div className="scale-labels">
           <span>{s.left}</span>
           <span>{s.right}</span>
         </div>
-        {giver && !reveal && secret && (
+        {giver && !reveal && secret && !spinning && (
           <div className="secret-target">
             <EyeOff size={14} /> Secret 4-point center:{" "}
             <strong>{secret.target}/100</strong>
           </div>
         )}
-        {reveal && (
+        {reveal && !isParty(s) && (
           <div className="reveal-points">
             <strong>+{s.result.points}</strong>
             <span>
@@ -299,12 +330,13 @@ function Wheel({
       </div>
       {giver && s.phase === "prepare" && (
         <div className="action-form">
-          <Button onClick={spin} disabled={disabled}>
-            <RefreshCw size={17} /> Spin the wheel
+          <Button onClick={spin} disabled={disabled || spinning}>
+            <RefreshCw size={17} /> {spinning ? "Spinning…" : "Spin the wheel"}
           </Button>
         </div>
       )}
-      {giver && s.phase === "clue" && (
+      {spinning && <p className="spin-status" role="status">Spinning the wheel…</p>}
+      {giver && s.phase === "clue" && !spinning && (
         <form onSubmit={submit} className="action-form">
           <Field label="Your clue">
             <input
@@ -323,7 +355,7 @@ function Wheel({
           </Button>
         </form>
       )}
-      {!giver && s.phase === "guess" && (
+      {!giver && s.phase === "guess" && !locked && (
         <form
           className="action-form"
           onSubmit={(e) => {
@@ -352,7 +384,7 @@ function Wheel({
       )}
       {giver && s.phase === "guess" && (
         <Notice>
-          You sent “{s.clue}”. Let’s see where your person places it.
+          You sent “{s.clue}”. Let’s see where everyone places it.
         </Notice>
       )}
       {s.phase === "pending" && (
@@ -404,6 +436,7 @@ function Chain({
     [selected, setSelected] = useState(0),
     [editing, setEditing] = useState(0);
   const opponent = other(s, uid),
+    guessingMine = previousPlayer(s, uid),
     board = s.boards?.[opponent],
     myBoard = s.boards?.[uid];
   useEffect(() => {
@@ -450,7 +483,7 @@ function Chain({
           </h2>
           <p>
             {myBoard
-              ? `Waiting for ${name(opponent)} to finish their chain.`
+              ? `Waiting for everyone to finish their chains.`
               : `Build ${s.config.wordCount} connected words, one at a time. Each neighboring pair should make sense together. Only word 1 starts with a letter; the others stay hidden until a letter hint.`}
           </p>
         </div>
@@ -527,7 +560,7 @@ function Chain({
         <p>
           {myTurn
             ? "Use the connections to guess. Later words stay hidden until you spend a turn revealing a letter."
-            : `${name(s.turn)} is working on your words.`}
+            : `${name(s.turn)} is guessing ${name(other(s, s.turn))}’s chain.`}
         </p>
       </div>
       {s.feedback && (
@@ -571,7 +604,7 @@ function Chain({
                 <span>{word}</span>
                 <small>{myBoard?.solved?.[i] ? "found" : "still a mystery"}</small>
               </div>
-              <GuessTrail board={myBoard} index={i} label={`${name(opponent)}’s guesses for word ${i + 1}`} />
+              <GuessTrail board={myBoard} index={i} label={`${name(guessingMine)}’s guesses for word ${i + 1}`} />
             </div>
           ))}
         </section>
@@ -630,7 +663,7 @@ function GuessTrail({ board, index, label, expanded = false }) {
 }
 function ChainAnswers({ s, uid, secret, name }) {
   return <div className="chain-answers">
-    <h3>Both chains, revealed</h3>
+    <h3>Every chain, revealed</h3>
     <div className="word-boards">{s.players.map((owner) => {
       const board = s.boards?.[owner];
       const answers = board?.answers || (owner === uid ? secret?.words : null);
@@ -638,7 +671,7 @@ function ChainAnswers({ s, uid, secret, name }) {
         <h4>{name(owner)}’s chain</h4>
         {answers ? <ol className="answer-list">{answers.map((word, i) => <li key={i}>
           <strong>{word}</strong><span>{board.solved?.[i] ? "Guessed" : "Revealed at the end"}</span>
-          <GuessTrail board={board} index={i} label={`${name(other(s, owner))}’s guesses for word ${i + 1}`} />
+          <GuessTrail board={board} index={i} label={`${name(previousPlayer(s, owner))}’s guesses for word ${i + 1}`} />
         </li>)}</ol> : <p>Waiting for {name(owner)} to reconnect and share their answers.</p>}
       </section>;
     })}</div>
@@ -655,10 +688,15 @@ function Clues({
   act,
   secretPath,
   now,
+  submissions = {},
 }) {
   const [word, setWord] = useState(""),
     [hint, setHint] = useState(""),
     [guess, setGuess] = useState("");
+  const party = isParty(s);
+  const mine = s.progress?.[uid];
+  const waiting = party && (mine?.done || mine?.used >= s.config.guessesPerHint || submissions[uid]?.entries?.[mine?.count || 0]);
+  const used = party ? mine?.used || 0 : s.used;
   const topic = s.topicLabel || s.config.category;
   const giver = s.giver === uid,
     reveal = s.phase === "reveal";
@@ -681,7 +719,7 @@ function Clues({
       if (normalize(hint) === normalize(secret?.word))
         throw Error("Keep the answer a secret. Try a different hint.");
       return mutate(
-        (v) => ({
+        (v) => party ? partyHint(v, hint.trim(), now) : ({
           ...v,
           hints: [...(v.hints || []), hint.trim()],
           hintIndex: v.hintIndex + 1,
@@ -773,7 +811,7 @@ function Clues({
           </div>
           {!!s.attempts?.length && <ClueHistory s={s} />}
           {giver && s.phase === "hint" && s.hintIndex > 0 && (
-            <Notice>Review {name(other(s, uid))}’s guesses above, then tailor hint {s.hintIndex + 1} to guide them closer.</Notice>
+            <Notice>Review {party ? "everyone’s guesses below" : `${name(other(s, uid))}’s guesses above`}, then tailor hint {s.hintIndex + 1} to guide them closer.</Notice>
           )}
           {giver && s.phase === "hint" && (
             <form onSubmit={sendHint} className="action-form">
@@ -798,7 +836,7 @@ function Clues({
               </Button>
             </form>
           )}
-          {!giver && s.phase === "guess" && (
+          {!giver && s.phase === "guess" && !waiting && (
             <form
               className="action-form"
               onSubmit={(e) => {
@@ -808,7 +846,7 @@ function Clues({
               }}
             >
               <Field
-                label={`${s.config.guessesPerHint - s.used} ${s.config.guessesPerHint - s.used === 1 ? "guess" : "guesses"} left for this hint`}
+                label={`${s.config.guessesPerHint - used} ${s.config.guessesPerHint - used === 1 ? "guess" : "guesses"} left for this hint`}
               >
                 <input
                   autoFocus
@@ -826,7 +864,7 @@ function Clues({
               </Button>
             </form>
           )}
-          {reveal && (
+          {reveal && !party && (
             <div className="reveal-points">
               <strong>+{s.result.points}</strong>
               <span>
@@ -837,7 +875,7 @@ function Clues({
             </div>
           )}
           {giver && s.phase === "guess" && (
-            <Notice>Let’s see what {name(other(s, uid))} makes of that.</Notice>
+            <Notice>Waiting for the word finders. Guesses appear below as they arrive.</Notice>
           )}
           {!giver && s.phase === "hint" && (
             <Notice>The next hint is on its way.</Notice>

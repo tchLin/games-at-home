@@ -1,3 +1,4 @@
+import { members, capacity, everyoneReady } from "./players.js";
 import { useEffect, useState } from "react";
 import {
   House,
@@ -264,7 +265,7 @@ export default function App() {
           <span>
             <House size={13} /> A little place for quality time.
           </span>
-          <span>Made for two. Always free to play.</span>
+          <span>Made for your people. Always free to play.</span>
         </footer>
       </div>
     </>
@@ -308,12 +309,12 @@ function Home({
             </svg>
           </h1>
           <p>
-            Put the world on pause. Pick a game, invite your favorite person,
+            Put the world on pause. Pick a game, invite your favorite people,
             and make a little time for each other.
           </p>
           <div className="hero-benefits">
             <span>
-              <Users size={17} /> Just the two of you
+              <Users size={17} /> Two to five players
             </span>
             <span>
               <Heart size={17} /> A few minutes, a little closer
@@ -400,7 +401,7 @@ function Home({
                 : mode === "create"
                   ? !user || user.isAnonymous
                     ? "Create room as guest"
-                    : "Make room for two"
+                    : "Make a little room"
                   : !user || user.isAnonymous
                     ? "Join room as guest"
                     : "Join your person"}
@@ -510,7 +511,7 @@ function Home({
       <details className="public-info">
         <summary>How public rooms and privacy work</summary>
         <p>
-          Four public rooms hold two players each, with no signup required. One additional room
+          Four public rooms hold up to five players each, with no signup required. One additional room
           is reserved for the owners. A room code is an invitation: share it
           only with the person you want to play with. Your Google email is not
           shown to other players. Secret words stay private until the game
@@ -518,7 +519,7 @@ function Home({
         </p>
         <p>
           Backwards &amp; Forwards uses your microphone only when you choose to record.
-          The short recording is shared with your room partner and removed when
+          The short recording is shared with the players in your room and removed when
           the host advances the round, changes games, or ends the room. Headphones
           help keep practice private when you’re also on a call.
         </p>
@@ -551,7 +552,7 @@ function Room({ code, user, onHome, report, act, busy }) {
   }
   async function leave() {
     await act(async () => {
-      if (isHost) await update(ref(db), { [`${base}/meta/open`]: false, [`roundAudio/${base.split('/')[1]}`]: null });
+      if (isHost) await update(ref(db), { [`${base}/meta/open`]: false, [`roundAudio/${base.split('/')[1]}`]: null, [`submissions/${base.split('/')[1]}`]: null });
       onHome();
     });
   }
@@ -603,7 +604,7 @@ function Room({ code, user, onHome, report, act, busy }) {
         </div>
       </div>
       <div className="players-strip">
-        {[room.meta.host, room.meta.guest].map((uid, i) => (
+        {Array.from({ length: Math.max(2, members(room.meta).length) }, (_, i) => members(room.meta)[i]).map((uid, i) => (
           <div className="player-chip" key={i}>
             <span className={`avatar avatar-${i}`}>
               {uid ? name(uid).slice(0, 1).toUpperCase() : <Users size={20} />}
@@ -634,19 +635,19 @@ function Room({ code, user, onHome, report, act, busy }) {
             )}
           </div>
         ))}
-        {!room.meta.guest && (
+        {!room.state && members(room.meta).length < capacity(room.meta) && (
           <Button secondary onClick={copy}>
-            {copied ? "Copied!" : "Invite your person"}
+            {copied ? "Copied!" : "Invite players"}
             <Copy size={15} />
           </Button>
         )}
       </div>
       {room.state ? (
         <>
-          {!gameEnded(room.state) && <GameChangeControls request={room.gameChange} gameId={room.state.id} uid={user.uid} name={name}
+          {!gameEnded(room.state) && <GameChangeControls request={room.gameChange} gameId={room.state.id} players={room.state.players} uid={user.uid} name={name}
             connected={connected} hostOnline={Boolean(room.presence?.[room.meta.host])} busy={busy}
-            onRequest={() => act(() => requestGameChange(db, base, room.state.id, user.uid))}
-            onRespond={(accept) => act(() => respondToGameChange(db, base, room.gameChange, user.uid, accept))} />}
+            onRequest={() => act(() => requestGameChange(db, base, room.state.id, user.uid, room.state.players))}
+            onRespond={(accept) => act(() => respondToGameChange(db, base, room.gameChange, user.uid, accept, room.state.players))} />}
           <Game {...session} uid={user.uid} name={name} act={act} busy={busy} />
         </>
       ) : (
@@ -675,7 +676,7 @@ function Room({ code, user, onHome, report, act, busy }) {
             </h2>
             <p>
               {isHost
-                ? "Ending the room closes it for both players. You can create a new room whenever you like."
+                ? "Ending the room closes it for everyone. You can create a new room whenever you like."
                 : user.isAnonymous
                   ? "Your seat and progress are saved. Use this room code in the same browser to rejoin. Clearing browser data or changing your sign-in loses your guest seat."
                   : "Your seat and progress are saved. Sign in with the same Google account and use this room code to rejoin."}
@@ -707,19 +708,18 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
   };
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
   const ready = (room.ready?.[uid] || 0) > 0;
-  const guestReady =
-    room.meta.guest && (room.ready?.[room.meta.guest] || 0) > 0;
+  const guestReady = everyoneReady(room);
   const start = () =>
     act(async () => {
       try {
         await update(ref(db), lobbyStartUpdate(
           base,
           { ...draft, version: dirty ? settings.version + 1 : settings.version },
-          [room.meta.host, room.meta.guest],
+          members(room.meta),
           crypto.randomUUID(),
         ));
       } catch (error) {
-        if (isPermissionDenied(error)) throw Error("Couldn’t start. Check that your room is open and your guest is still ready, then try again.");
+        if (isPermissionDenied(error)) throw Error("Couldn’t start. Check that your room is open and everyone is still ready, then try again.");
         throw error;
       }
     });
@@ -733,7 +733,7 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
         <h1>A good evening starts here.</h1>
         <p>
           {isHost
-            ? "Settings sync automatically. Pick a game, then hit Start when your person is ready."
+            ? "Settings sync automatically. Pick a game, then hit Start when everyone is ready."
             : "You can get ready while your host sets things up, or unready at any time before they start."}
         </p>
       </div>
@@ -852,12 +852,12 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
             <strong>How this one works</strong>
             <p>
               {cfg.game === "wheel"
-                ? "The system gives a topic and a pair of opposites. Spin to see a hidden 1–2–3–4–3–2–1 scoring band. Name something in that topic that would lead your partner to the 4-point zone. They place the needle, then you reveal and score. Swap roles each round."
+                ? "The system gives a topic and a pair of opposites. Spin to see a hidden 1–2–3–4–3–2–1 scoring band. Name something in that topic that would lead your partner to the 4-point zone. Everyone else places a private guess, then you reveal and score. In a group, each guesser earns their own points. Rotate the clue giver each round."
                 : cfg.game === "chain"
-                  ? "Build a secret chain: every neighboring pair must form a meaningful connection, like coffee → shop → window → shopping → cart. Suggestions follow the word you type. Only the first word starts with a visible initial. All other letters require a hint. Correct guesses keep your turn; wrong guesses or letter hints pass it. Both chains and each word’s guess history are shown at the end. First to solve the other chain wins."
+                  ? "Build a secret chain: every neighboring pair must form a meaningful connection, like coffee → shop → window → shopping → cart. Suggestions follow the word you type. Only the first word starts with a visible initial. All other letters require a hint. Correct guesses keep your turn; wrong guesses or letter hints pass it. Each person guesses the next player’s chain in a circle. Turns pass around the room. Every chain and its guess history are shown at the end. First to solve their assigned chain wins."
                   : cfg.game === 'reverse'
-                    ? "Your secret word appears automatically. Listen to its backwards pronunciation. Imitate it in one recording (up to 8 seconds). Your partner hears your recording flipped around, with up to three listens and one guess. Exact answers pass automatically. The word holder marks other answers Pass or No pass, so spelling can be flexible. A pass earns the listener one point. Swap roles each round. Microphone permission is needed; headphones help when you’re on a call."
-                    : "Choose a word that fits the topic, then give the first single-word hint. Your partner gets two guesses by default (adjustable above). Review their guesses before tailoring each next hint. Up to three hints; a correct guess ends the round. Swap roles each round."}
+                    ? "Your secret word appears automatically. Listen to its backwards pronunciation. Imitate it in one recording (up to 8 seconds). Everyone else hears your recording flipped around, with up to three listens and one guess per person. Exact answers pass automatically. The word holder marks other answers Pass or No pass, so spelling can be flexible. A pass earns the listener one point. Swap roles each round. Microphone permission is needed; headphones help when you’re on a call."
+                    : "Choose a word that fits the topic, then give the first single-word hint. Your partner gets two guesses by default (adjustable above). Review their guesses before tailoring each next hint. Up to three hints; solved players wait while others continue. Rotate the clue giver each round."}
             </p>
             <small>
               Timers apply to guessing. Preparation is untimed. The clock pauses
@@ -868,8 +868,8 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
             <div className="form-buttons">
               <Button onClick={start} disabled={busy || !guestReady || !bothOnline || !draft.left.trim() || !draft.right.trim()}>
                 {!room.meta.guest ? "Waiting for your person…"
-                  : !guestReady ? "Waiting for guest to be ready…"
-                  : !bothOnline ? "Waiting for both players…" : "Start game"}
+                  : !guestReady ? "Waiting for everyone to be ready…"
+                  : !bothOnline ? "Waiting for everyone…" : "Start game"}
                 <ArrowRight size={18} />
               </Button>
             </div>
@@ -880,7 +880,7 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
             </Button>
           )}
           <p className="entry-footnote">
-            {isHost ? guestReady ? "Guest is ready. Start with the settings above whenever you are." : "Your guest can get ready while you choose the settings."
+            {isHost ? guestReady ? "Everyone is ready. Start with the settings above whenever you are." : "Players can get ready while you choose the settings."
               : ready ? "You’re ready. Your host can keep adjusting settings, then start." : "Ready is independent of settings. You can change your mind before the game starts."}
           </p>
         </section>

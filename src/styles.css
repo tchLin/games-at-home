@@ -1921,3 +1921,25 @@ footer span {
 .post-game-actions .form-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .post-game-actions p { margin-top: 14px; font-size: 14px; color: var(--muted); }
 @media (max-width: 600px) { .post-game-actions .form-buttons { grid-template-columns: 1fr; } }
+
+/* The spin is decorative: the secret target is never sent to other players. */
+.wheel-spin-disc { transform-origin: 150px 145px; animation: wheel-spin 1.5s cubic-bezier(.12,.68,.16,1) both; }
+@keyframes wheel-spin { from { transform: rotate(-1080deg); } to { transform: rotate(0deg); } }
+.spin-status { text-align: center; font-weight: 600; color: var(--text); }
+.players-strip { flex-wrap: wrap; }
+.party-status { margin: 2rem auto 0; width: 100%; }
+.party-players { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 1rem; }
+.party-player { padding: 1rem; border: 1px solid #e4d9c8; border-radius: 16px; min-width: 0; overflow-wrap: anywhere; }
+.party-player h3 { margin: 0 0 .5rem; }
+.party-player ol { padding-left: 1.3rem; }
+.party-player li { margin: .4rem 0; }
+.party-player .form-buttons { display: flex; flex-wrap: wrap; gap: .5rem; }
+.party-player .button { min-width: 0; flex: 1 1 90px; }
+@media (prefers-reduced-motion: reduce) { .wheel-spin-disc { animation: none; } }
+.players-strip .player-chip { flex: 1 1 190px; }
+.avatar { flex-shrink: 0; }
+.avatar-2 { background: #ece0c0; color: #8c713f; }
+.avatar-3 { background: #e6d5d3; color: #956a65; }
+.avatar-4 { background: #dbe3e1; color: #5e7974; }
+.final-scores { flex-wrap: wrap; gap: clamp(1rem, 4vw, 4rem); }
+.final-scores > div { min-width: 5rem; }
