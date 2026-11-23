@@ -5,7 +5,7 @@ import { Button, Field, Tag, Notice } from './App.jsx';
 import { deadline, judgeReverse } from './engine.js';
 import { pronunciationUrl } from './reverse-words.js';
 import { isExactReverseGuess } from './reverse-game.js';
-import { RECORD_SECONDS, audioContext, decode, playBuffer, microphone, reverseWav, toBase64, fromBase64 } from './reverse-audio.js';
+import { RECORD_SECONDS, audioContext, audioSession, resumeAudio, requireRunning, decode, playBuffer, microphone, reverseWav, toBase64, fromBase64 } from './reverse-audio.js';
 import { sounds } from './sound.js';
 
 export default function ReverseGame({ room, s, secret, uid, name, disabled, mutate, act, now, base, send }) {
@@ -25,6 +25,7 @@ export default function ReverseGame({ room, s, secret, uid, name, disabled, muta
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
       r.alive = false; r.stop?.(); r.mic?.cancel();
+      r.restoreSession?.();
       clearInterval(r.timer); void r.context?.close(); sounds.setSuppressed(false);
     };
   }, []);
@@ -35,8 +36,14 @@ export default function ReverseGame({ room, s, secret, uid, name, disabled, muta
   }, [s.phase, giver]);
   const context = async () => {
     const r = resources.current;
-    r.context ||= audioContext();
-    await r.context.resume();
+    r.restoreSession ||= audioSession('playback');
+    if (!r.context) {
+      r.context = audioContext();
+      r.context.onstatechange = () => {
+        if (r.alive && r.context.state !== 'running') { r.stop?.(); setPlaying(false); }
+      };
+    }
+    await resumeAudio(r.context);
     return r.context;
   };
   const listen = (reference) => act(async () => {
@@ -58,13 +65,16 @@ export default function ReverseGame({ room, s, secret, uid, name, disabled, muta
       }
       buffer = r.clip;
       if (!r.alive) return;
+      requireRunning(ctx); // Don't spend a listen if loading was interrupted.
       const claimed = await mutate((v) => v.id === s.id && v.round === s.round && v.phase === 'guess' && v.plays < 3
         ? { ...v, plays: v.plays + 1 } : null);
       if (!claimed) throw Error('No listens remain, or this turn has ended.');
     }
     if (!r.alive) return;
-    r.stop?.(); setPlaying(true);
-    r.stop = playBuffer(ctx, buffer, () => { if (r.alive) setPlaying(false); });
+    r.stop?.();
+    setPlaying(true);
+    try { r.stop = playBuffer(ctx, buffer, () => { if (r.alive) setPlaying(false); }); }
+    catch (error) { setPlaying(false); throw error; }
   });
   const record = () => {
     const clockOffset = now - Date.now();

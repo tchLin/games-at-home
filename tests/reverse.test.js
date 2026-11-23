@@ -2,11 +2,39 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { reverseWav, toBase64, fromBase64, SAMPLE_RATE, MAX_AUDIO_BASE64 } from '../src/reverse-audio.js';
+import { reverseWav, toBase64, fromBase64, audioSession, resumeAudio, playBuffer, SAMPLE_RATE, MAX_AUDIO_BASE64 } from '../src/reverse-audio.js';
 import { newGame, nextRound, resolve, judgeReverse } from '../src/engine.js';
 import { DEFAULT_SETTINGS } from '../src/content.js';
 import { REVERSE_WORDS } from '../src/reverse-words.js';
 import { chooseReverseWord, reverseWordAssignment } from '../src/reverse-game.js';
+
+test('speech opts into media playback and restores the prior session; unsupported browsers still work', (t) => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  t.after(() => original ? Object.defineProperty(globalThis, 'navigator', original) : delete globalThis.navigator);
+  const session = { type: 'auto' };
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { audioSession: session } });
+  const restore = audioSession('playback');
+  assert.equal(session.type, 'playback');
+  const afterMic = audioSession('auto');
+  assert.equal(session.type, 'auto');
+  afterMic(); assert.equal(session.type, 'playback');
+  restore(); assert.equal(session.type, 'auto');
+  delete navigator.audioSession;
+  assert.doesNotThrow(() => audioSession('playback')());
+  navigator.audioSession = { get type() { return 'auto'; }, set type(_) { throw Error('Unsupported'); } };
+  assert.doesNotThrow(() => audioSession('playback')());
+});
+
+test('resume happens inside the tap and rejects interrupted or stalled audio', async () => {
+  let resumed = false;
+  const ctx = { state: 'suspended', resume() { resumed = true; this.state = 'running'; return Promise.resolve(); } };
+  const ready = resumeAudio(ctx);
+  assert.equal(resumed, true, 'resume must happen before returning to the event loop');
+  await ready;
+  await assert.rejects(resumeAudio({ state: 'interrupted', resume: async () => {} }), /Audio couldn’t start/);
+  await assert.rejects(resumeAudio({ state: 'suspended', resume: () => new Promise(() => {}) }, 5), /Audio couldn’t start/);
+  assert.throws(() => playBuffer({ state: 'interrupted' }, {}), /Audio couldn’t start/);
+});
 
 test('exact answers pass automatically while spelling variants stay for manual review', () => {
   const s = { ...newGame({ ...DEFAULT_SETTINGS, game: 'reverse' }, ['a','b'], 'exact'), phase: 'pending',
@@ -101,7 +129,8 @@ test('microphone capture stops all tracks and resolves a short blob without reta
   });
   let tracksStopped = 0;
   const stream = { getTracks: () => [{ stop: () => tracksStopped++ }] };
-  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaDevices: { getUserMedia: async () => stream } } });
+  const session = { type: 'playback' };
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { audioSession: session, mediaDevices: { getUserMedia: async () => stream } } });
   class Recorder {
     static isTypeSupported(type) { return type === 'audio/mp4'; }
     state = 'inactive';
@@ -115,10 +144,12 @@ test('microphone capture stops all tracks and resolves a short blob without reta
   }
   Object.defineProperty(globalThis, 'MediaRecorder', { configurable: true, value: Recorder });
   const mic = await microphone();
+  assert.equal(session.type, 'auto');
   const captured = mic.start();
   mic.stop();
   assert.equal((await captured).type, 'audio/mp4');
   assert.equal(tracksStopped, 1);
+  assert.equal(session.type, 'playback');
   const interrupted = await microphone();
   const failed = interrupted.start();
   interrupted.cancel();
@@ -126,4 +157,5 @@ test('microphone capture stops all tracks and resolves a short blob without reta
   assert.ok(tracksStopped >= 2);
   navigator.mediaDevices.getUserMedia = async () => { throw Object.assign(Error('Denied'), { name: 'NotAllowedError' }); };
   await assert.rejects(microphone(), { name: 'NotAllowedError' });
+  assert.equal(session.type, 'playback', 'denied microphone access restores the playback route');
 });

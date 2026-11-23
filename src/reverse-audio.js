@@ -39,12 +39,41 @@ export function audioContext() {
   if (!Audio) throw Error('Audio is unavailable in this browser. Try an updated Safari or Chrome.');
   return new Audio();
 }
+// Web Audio defaults to an ambient session on iOS, which the Silent switch
+// can mute. Game speech is media playback. Feature detection keeps this optional.
+export function audioSession(type) {
+  const session = globalThis.navigator?.audioSession;
+  if (!session) return () => {};
+  try {
+    const previous = session.type;
+    session.type = type;
+    return () => { try { session.type = previous; } catch {} };
+  } catch { return () => {}; }
+}
+const PLAYBACK_BLOCKED = 'Audio couldn’t start. Check media volume and headphones; if you’re on a call, pause it and tap Play again.';
+export function requireRunning(context) {
+  if (context.state !== 'running') throw Error(PLAYBACK_BLOCKED);
+}
+export async function resumeAudio(context, timeoutMs = 4000) {
+  // Invoke resume synchronously from the tap, before any download/database await.
+  // Safari can leave this promise pending during a call or after backgrounding.
+  let timer;
+  try {
+    await Promise.race([
+      context.resume(),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(Error(PLAYBACK_BLOCKED)), timeoutMs); }),
+    ]);
+    requireRunning(context);
+  } catch { throw Error(PLAYBACK_BLOCKED); }
+  finally { clearTimeout(timer); }
+}
 export async function decode(context, bytes, reverse = false) {
   const buffer = await context.decodeAudioData(bytes);
   if (reverse) for (let i = 0; i < buffer.numberOfChannels; i++) buffer.getChannelData(i).reverse();
   return buffer;
 }
 export function playBuffer(context, buffer, ended) {
+  requireRunning(context);
   const source = context.createBufferSource();
   source.buffer = buffer;
   source.connect(context.destination);
@@ -58,14 +87,24 @@ export function playBuffer(context, buffer, ended) {
 export async function microphone() {
   if (!navigator.mediaDevices?.getUserMedia || !globalThis.MediaRecorder)
     throw Error('Recording is unavailable here. Open this HTTPS site in an updated Safari or Chrome.');
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  // Let the browser choose its recording route while the mic is active, then
+  // restore playback after stopping so subsequent words don't use the earpiece.
+  const restoreSession = audioSession('auto');
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
+  catch (error) { restoreSession(); throw error; }
   let recorder;
   try {
     const mimeType = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find((type) => MediaRecorder.isTypeSupported(type));
     recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-  } catch (error) { stream.getTracks().forEach((track) => track.stop()); throw error; }
+  } catch (error) { stream.getTracks().forEach((track) => track.stop()); restoreSession(); throw error; }
   let timer, cancelled = false;
-  const tracksOff = () => stream.getTracks().forEach((track) => track.stop());
+  let released = false;
+  const tracksOff = () => {
+    if (released) return;
+    released = true;
+    stream.getTracks().forEach((track) => track.stop()); restoreSession();
+  };
   const stop = () => { if (recorder.state === 'recording') recorder.stop(); };
   const cancel = () => { cancelled = true; clearTimeout(timer); stop(); tracksOff(); };
   const start = () => new Promise((resolve, reject) => {

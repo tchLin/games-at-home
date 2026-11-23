@@ -461,7 +461,7 @@ describe('Backwards & Forwards', () => {
     expect(result.scores.guest).toBe(1);
   });
   it('decodes a clip before claiming playback, and the counter survives rerender', async () => {
-    const ctx = { resume: vi.fn(async () => {}), close: vi.fn(async () => {}) };
+    const ctx = { state: 'running', resume: vi.fn(async () => {}), close: vi.fn(async () => {}) };
     vi.spyOn(reverseAudio, 'audioContext').mockReturnValue(ctx);
     vi.spyOn(reverseAudio, 'decode').mockResolvedValue({ duration: 1 });
     const play = vi.spyOn(reverseAudio, 'playBuffer').mockImplementation((c, b, ended) => { ended(); return vi.fn(); });
@@ -476,7 +476,7 @@ describe('Backwards & Forwards', () => {
     expect(screen.getByRole('button', { name: /Listen · 2 left/ })).toBeTruthy();
   });
   it('claims one take, stops the mic, reverses samples and uploads a room-bound clip', async () => {
-    const ctx = { resume: vi.fn(async () => {}), close: vi.fn(async () => {}) };
+    const ctx = { state: 'running', resume: vi.fn(async () => {}), close: vi.fn(async () => {}) };
     vi.spyOn(reverseAudio, 'audioContext').mockReturnValue(ctx);
     vi.spyOn(reverseAudio, 'decode').mockResolvedValue({ numberOfChannels: 1, sampleRate: 12000, getChannelData: () => new Float32Array([.1,.2,.3]) });
     let finish;
@@ -494,6 +494,43 @@ describe('Backwards & Forwards', () => {
     await waitFor(() => expect(set).toHaveBeenCalledWith('roundAudio/1', expect.objectContaining({ roomCode: '1ABCDEFG', owner: 'host', round: 1, data: expect.stringMatching(/^UklGR/) })));
     expect(mic.cancel).toHaveBeenCalled();
     expect(p.mutate.mock.calls.at(-1)[0](p.room.state).phase).toBe('guess');
+  });
+  it('sets media playback and resumes in the tap before fetching the pronunciation', async () => {
+    const events = [];
+    const restore = vi.fn();
+    vi.spyOn(reverseAudio, 'audioSession').mockImplementation((type) => { events.push(type); return restore; });
+    const ctx = { state: 'running', resume: vi.fn(async () => { events.push('resume'); }), close: vi.fn(async () => {}) };
+    vi.spyOn(reverseAudio, 'audioContext').mockReturnValue(ctx);
+    vi.spyOn(reverseAudio, 'decode').mockResolvedValue({ duration: 1 });
+    const play = vi.spyOn(reverseAudio, 'playBuffer').mockImplementation((c, b, end) => { end(); return vi.fn(); });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      events.push('fetch');
+      return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) };
+    });
+    const p = make();
+    p.secret = { gameId: p.room.state.id, round: 1, word: 'banana' };
+    const { unmount } = render(<Game {...p} />);
+    fireEvent.click(screen.getByRole('button', { name: /Hear it backwards/ }));
+    expect(events).toEqual(['playback', 'resume']);
+    await waitFor(() => expect(play).toHaveBeenCalledTimes(1));
+    expect(events).toEqual(['playback', 'resume', 'fetch']);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    unmount();
+    expect(restore).toHaveBeenCalledOnce();
+  });
+  it('does not spend a listen when the phone interrupts audio during download', async () => {
+    const ctx = { state: 'running', resume: vi.fn(async () => {}), close: vi.fn(async () => {}) };
+    vi.spyOn(reverseAudio, 'audioContext').mockReturnValue(ctx);
+    vi.spyOn(reverseAudio, 'decode').mockImplementation(async () => { ctx.state = 'interrupted'; return {}; });
+    const play = vi.spyOn(reverseAudio, 'playBuffer');
+    const error = vi.fn();
+    const p = make('guess', { uid: 'guest', isHost: false, act: async (fn) => { try { await fn(); } catch (e) { error(e.message); } } });
+    get.mockResolvedValue({ val: () => ({ gameId: p.room.state.id, round: 1, data: 'AAAA' }) });
+    render(<Game {...p} />);
+    fireEvent.click(screen.getByRole('button', { name: /Listen · 3 left/ }));
+    await waitFor(() => expect(error).toHaveBeenCalledWith(expect.stringContaining('Audio couldn’t start')));
+    expect(p.mutate).not.toHaveBeenCalled();
+    expect(play).not.toHaveBeenCalled();
   });
 });
 
