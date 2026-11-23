@@ -1,9 +1,10 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.jsx";
+import LayoutCheck from './LayoutCheck.jsx';
 import "@fontsource/dm-sans/latin-400.css";
 import "@fontsource/dm-sans/latin-600.css";
 import "@fontsource/dm-serif-display/latin-400.css";
 import "@fontsource/dm-serif-display/latin-400-italic.css";
 import "./styles.css";
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(<><App />{new URLSearchParams(location.search).get('layout-check') === '1' && <LayoutCheck />}</>);

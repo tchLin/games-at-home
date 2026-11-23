@@ -1908,3 +1908,11 @@ footer span {
   .reverse-game .stage-title h2 { font-size: 28px; }
   .reverse-game .audio-actions { gap: 14px; }
 }
+
+/* Only visible with ?layout-check=1; measurements stay on this device. */
+.layout-check { position: fixed; z-index: 10000; top: 16px; right: 16px; width: min(420px, calc(100% - 32px)); max-height: calc(100dvh - 32px); overflow: auto; background: #fffdf8; color: #473d32; border: 2px solid #ab583d; border-radius: 12px; padding: 20px; box-shadow: 0 8px 40px #473d3233; text-align: left; }
+.layout-check h2 { font-size: 24px; margin: 0 0 10px; }
+.layout-check p { font-size: 16px; margin: 0 0 16px; }
+.layout-check .button { width: 100%; font-size: 14px; }
+.layout-check details, .layout-check a { display: block; font-size: 14px; margin-top: 16px; }
+.layout-check pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 40vh; overflow: auto; }
