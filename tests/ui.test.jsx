@@ -47,6 +47,7 @@ import { set, get, identity, guestLogin, createRoom, joinRoom, login, update, on
 beforeEach(() => {
   identity.mockResolvedValue(null);
   createRoom.mockResolvedValue("1ABCDEFG");
+  runTransaction.mockResolvedValue({ committed: true });
 });
 afterEach(() => {
   cleanup();
@@ -326,9 +327,13 @@ describe("flexible lobby readiness", () => {
     fireEvent.click(unready);
     await waitFor(() => expect(set).toHaveBeenCalledWith("rooms/1/ready/guest", 0));
   });
-  it("lets the host start with unsaved changes and saves that exact configuration", async () => {
+  it("automatically syncs host edits without a Save button and starts with the latest configuration", async () => {
     render(<Lobby {...base} uid="host" isHost room={{ ...room, ready: { guest: 1 } }} settings={DEFAULT_SETTINGS} />);
     fireEvent.change(screen.getByLabelText("Rounds"), { target: { value: "12" } });
+    await waitFor(() => expect(runTransaction).toHaveBeenCalled());
+    expect(runTransaction.mock.calls[0][0]).toBe('rooms/1/settings');
+    expect(runTransaction.mock.calls[0][1](DEFAULT_SETTINGS)).toEqual({ ...DEFAULT_SETTINGS, rounds: 12, version: 2 });
+    expect(screen.queryByRole('button', { name: /Save settings/ })).toBeNull();
     const start = screen.getByRole("button", { name: "Start game" });
     expect(start.disabled).toBe(false);
     fireEvent.click(start);
@@ -549,4 +554,27 @@ it('assigns a private word on entering the round, then automatically resolves an
     presence.mockImplementation(() => () => {});
     runTransaction.mockReset();
   }
+});
+
+it('offers the host another round or game selection immediately after the last reveal', async () => {
+  const p = props('reverse');
+  p.room.state = { ...p.room.state, phase: 'reveal', round: 6, scores: { host: 2, guest: 3 }, result: { word: 'banana', points: 1, correct: true } };
+  const { rerender } = render(<Game {...p} />);
+  expect(screen.queryByRole('button', { name: 'See how you did' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'One more round' }));
+  await waitFor(() => expect(update).toHaveBeenCalled());
+  const payload = update.mock.calls[0][1];
+  expect(payload['rooms/1/state'].id).not.toBe(p.room.state.id);
+  expect(payload['rooms/1/state'].giver).toBe('guest');
+  expect(payload['rooms/1/state'].scores).toEqual(p.room.state.scores);
+  expect(payload['rooms/1/state'].config.rounds).toBe(1);
+  expect(payload['rooms/1/postGame'].choice).toBe('again');
+  fireEvent.click(screen.getByRole('button', { name: 'Back to game selection' }));
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+  expect(update.mock.calls[1][1]['rooms/1/state']).toBeNull();
+  expect(update.mock.calls[1][1]['rooms/1/ready']).toBeNull();
+  rerender(<Game {...p} uid="guest" isHost={false} />);
+  expect(screen.queryByRole('button', { name: 'One more round' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Back to game selection' })).toBeNull();
+  expect(screen.getByText(/Your host can start one more round/)).toBeTruthy();
 });

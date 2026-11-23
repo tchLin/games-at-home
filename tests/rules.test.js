@@ -22,6 +22,7 @@ import { lobbyStartUpdate } from "../src/lobby.js";
 import { joinRoom } from "../src/rooms.js";
 import { reverseWav, toBase64 } from '../src/reverse-audio.js';
 import { reverseWordAssignment } from '../src/reverse-game.js';
+import { postGameUpdate } from '../src/post-game.js';
 let env;
 const token = (email) => ({
   email,
@@ -524,4 +525,58 @@ test('automatic secret assignment survives concurrent tabs and exact guesses res
   await assertSucceeds(set(ref(h(), 'rooms/1/state'), resolved));
   assert.equal((await get(ref(g(), 'rooms/1/state/result/word'))).val(), 'banana');
   await assertFails(get(ref(g(), 'secrets/1/host')));
+});
+
+async function endedFixture(game = 'reverse') {
+  const state = { ...newGame({ ...DEFAULT_SETTINGS, game, rounds: 2 }, ['host', 'guest'], `ended-${game}`),
+    phase: game === 'chain' ? 'finished' : 'reveal', round: 2, giver: 'guest', winner: 'host', scores: { host: 2, guest: 3 } };
+  await env.withSecurityRulesDisabled(async (c) => update(ref(c.database()), {
+    'rooms/1/state': state,
+    'rooms/1/ready': null,
+    'roundAudio/1': { roomCode: '1ABCDEFG', gameId: state.id, round: 2, owner: 'guest', data: toBase64(reverseWav([new Float32Array(1200)], 12000)) },
+  }));
+  return state;
+}
+test('only the host can choose an extra round after the game; no new readiness is required', async () => {
+  for (const game of ['wheel', 'clues', 'reverse', 'chain']) {
+    const state = await endedFixture(game);
+    const payload = postGameUpdate('rooms/1', state, 'again', `encore-${game}`);
+    await assertFails(update(ref(g()), payload));
+    await assertFails(update(ref(outsider()), payload));
+    await assertSucceeds(update(ref(h()), payload));
+    const shared = (await get(ref(g(), 'rooms/1/state'))).val();
+    assert.equal(shared.id, `encore-${game}`);
+    assert.equal(shared.config.rounds, 1);
+    assert.equal(shared.scores.host, game === 'chain' ? 0 : 2);
+    if (game !== 'chain') assert.equal(shared.giver, 'host');
+    assert.equal((await get(ref(h(), 'rooms/1/ready'))).val(), null);
+    await env.withSecurityRulesDisabled(async (c) => assert.equal((await get(ref(c.database(), 'roundAudio/1'))).val(), null));
+    await assertFails(update(ref(h()), postGameUpdate('rooms/1', state, 'lobby')));
+    assert.equal((await get(ref(g(), 'rooms/1/state/id'))).val(), `encore-${game}`);
+  }
+});
+test('host can return both players to game selection after the game and preserve their room', async () => {
+  const state = await endedFixture();
+  const payload = postGameUpdate('rooms/1', state, 'lobby');
+  await assertFails(update(ref(g()), payload));
+  await assertSucceeds(update(ref(h()), payload));
+  for (const client of [h(), g()]) {
+    assert.equal((await get(ref(client, 'rooms/1/state'))).val(), null);
+    assert.equal((await get(ref(client, 'rooms/1/meta/code'))).val(), '1ABCDEFG');
+    assert.equal((await get(ref(client, 'rooms/1/meta/guest'))).val(), 'guest');
+    assert.equal((await get(ref(client, 'rooms/1/ready'))).val(), null);
+  }
+  await set(ref(g(), 'rooms/1/ready/guest'), 1);
+  await assertSucceeds(update(ref(h()), lobbyStartUpdate('rooms/1', DEFAULT_SETTINGS, ['host', 'guest'], 'fresh-lobby-game')));
+  await assertFails(update(ref(h()), payload));
+  assert.equal((await get(ref(g(), 'rooms/1/state/id'))).val(), 'fresh-lobby-game');
+});
+test('post-game actions cannot be used mid-game or to silently switch game type', async () => {
+  const state = await endedFixture();
+  const payload = postGameUpdate('rooms/1', state, 'again', 'forged-game');
+  payload['rooms/1/state'] = newGame({ ...DEFAULT_SETTINGS, game: 'chain' }, ['host', 'guest'], 'forged-game');
+  await assertFails(update(ref(h()), payload));
+  await env.withSecurityRulesDisabled(async (c) => set(ref(c.database(), 'rooms/1/state/phase'), 'guess'));
+  await assertFails(update(ref(h()), postGameUpdate('rooms/1', state, 'lobby')));
+  await assertFails(update(ref(h()), postGameUpdate('rooms/1', state, 'again', 'too-early')));
 });

@@ -28,6 +28,7 @@ import {
   get,
   set,
   update,
+  runTransaction,
   roomPath,
   connect,
   disconnect,
@@ -42,6 +43,7 @@ import { SoundControls } from "./SoundControls.jsx";
 import { soundInteraction } from "./sound.js";
 import { useRoom } from "./useRoom.js";
 import Game from "./Game.jsx";
+import { gameEnded } from './engine.js';
 const saved = () => {
   try {
     return JSON.parse(localStorage.getItem("gah-room") || "null");
@@ -641,10 +643,10 @@ function Room({ code, user, onHome, report, act, busy }) {
       </div>
       {room.state ? (
         <>
-          <GameChangeControls request={room.gameChange} gameId={room.state.id} uid={user.uid} name={name}
+          {!gameEnded(room.state) && <GameChangeControls request={room.gameChange} gameId={room.state.id} uid={user.uid} name={name}
             connected={connected} hostOnline={Boolean(room.presence?.[room.meta.host])} busy={busy}
             onRequest={() => act(() => requestGameChange(db, base, room.state.id, user.uid))}
-            onRespond={(accept) => act(() => respondToGameChange(db, base, room.gameChange, user.uid, accept))} />
+            onRespond={(accept) => act(() => respondToGameChange(db, base, room.gameChange, user.uid, accept))} />}
           <Game {...session} uid={user.uid} name={name} act={act} busy={busy} />
         </>
       ) : (
@@ -695,18 +697,18 @@ function Room({ code, user, onHome, report, act, busy }) {
 export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline }) {
   const [draft, setDraft] = useState(settings);
   useEffect(() => setDraft(settings), [settings.version]);
-  const change = (key, value) => setDraft((d) => ({ ...d, [key]: value }));
+  const change = (key, value) => {
+    setDraft((d) => ({ ...d, [key]: value }));
+    act(async () => {
+      const result = await runTransaction(ref(db, `${base}/settings`), (current) => current
+        ? { ...current, [key]: value, version: current.version + 1 } : null, { applyLocally: false });
+      if (!result.committed) throw Error('Couldn’t sync that setting. Please try again.');
+    });
+  };
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
   const ready = (room.ready?.[uid] || 0) > 0;
   const guestReady =
     room.meta.guest && (room.ready?.[room.meta.guest] || 0) > 0;
-  const save = () =>
-    act(async () => {
-      const version = settings.version + 1;
-      await update(ref(db), {
-        [`${base}/settings`]: { ...draft, version },
-      });
-    });
   const start = () =>
     act(async () => {
       try {
@@ -731,7 +733,7 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
         <h1>A good evening starts here.</h1>
         <p>
           {isHost
-            ? "Pick a game and set the mood. Start when your person is ready; your latest settings save automatically."
+            ? "Settings sync automatically. Pick a game, then hit Start when your person is ready."
             : "You can get ready while your host sets things up, or unready at any time before they start."}
         </p>
       </div>
@@ -739,7 +741,7 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
         <div className="lobby-games">
           {Object.entries(GAMES).map(([id, g]) => (
             <button
-              disabled={!isHost}
+              disabled={!isHost || busy}
               key={id}
               className={`lobby-game ${g.color} ${cfg.game === id ? "selected" : ""}`}
               onClick={() => change("game", id)}
@@ -864,9 +866,6 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
           </div>
           {isHost ? (
             <div className="form-buttons">
-              {dirty && <Button secondary onClick={save} disabled={busy || !draft.left.trim() || !draft.right.trim()}>
-                Save settings <Check size={17} />
-              </Button>}
               <Button onClick={start} disabled={busy || !guestReady || !bothOnline || !draft.left.trim() || !draft.right.trim()}>
                 {!room.meta.guest ? "Waiting for your person…"
                   : !guestReady ? "Waiting for guest to be ready…"

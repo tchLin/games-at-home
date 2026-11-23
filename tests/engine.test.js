@@ -1,5 +1,7 @@
 import test from "node:test";
 import { WHEEL_ZONES, spinTarget } from "../src/wheel.js";
+import { encore, gameEnded } from '../src/engine.js';
+import { postGameUpdate } from '../src/post-game.js';
 import { nextWordIdeas, wordSuggestions } from "../src/word-links.js";
 import assert from "node:assert/strict";
 import {
@@ -273,4 +275,34 @@ test("clue topics support fixed choices and change each round in surprise mode",
   const surprise = create("clues", { category: "surprise" });
   assert.ok(WORDS[surprise.topicLabel]);
   assert.notEqual(nextRound(surprise).topicLabel, surprise.topicLabel);
+});
+
+test('an encore is one extra round with preserved points and swapped roles, or a fresh word race', () => {
+  for (const game of ['wheel', 'clues', 'reverse', 'chain']) {
+    const initial = newGame({ ...DEFAULT_SETTINGS, game, rounds: 2 }, ['a', 'b'], 'first');
+    assert.equal(encore(initial, 'early'), null);
+    const end = { ...initial, round: 2, phase: game === 'chain' ? 'finished' : 'reveal', giver: 'b', winner: 'a', scores: { a: 4, b: 5 } };
+    assert.equal(gameEnded(end), true);
+    const next = encore(end, 'next');
+    assert.equal(next.id, 'next');
+    assert.equal(next.config.rounds, 1);
+    assert.equal(next.round, 1);
+    assert.equal(next.pending, undefined);
+    if (game === 'chain') {
+      assert.equal(next.phase, 'setup');
+      assert.deepEqual(next.scores, { a: 0, b: 0 });
+      assert.deepEqual(next.boards, {});
+      assert.equal(next.turn, 'b');
+    } else {
+      assert.equal(next.giver, 'a');
+      assert.deepEqual(next.scores, end.scores);
+      assert.equal(next.phase, 'prepare');
+    }
+    const lobby = postGameUpdate('rooms/1', end, 'lobby');
+    assert.equal(lobby['rooms/1/state'], null);
+    assert.equal(lobby['rooms/1/ready'], null);
+    assert.equal(lobby['roundAudio/1'], null);
+    assert.deepEqual(lobby['rooms/1/postGame'], { gameId: 'first', choice: 'lobby' });
+    assert.throws(() => postGameUpdate('rooms/1', initial, 'lobby'), /not ended/);
+  }
 });

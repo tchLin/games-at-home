@@ -66,6 +66,19 @@ export function nextRound(s, now = Date.now()) {
     return { ...s, phase: "finished", deadline: 0 };
   return newRound({ ...s, round: s.round + 1 }, now);
 }
+export const gameEnded = (s) => s?.phase === 'finished' ||
+  (s?.phase === 'reveal' && s.round >= s.config.rounds);
+
+export function encore(s, id, now = Date.now()) {
+  if (!gameEnded(s)) return null;
+  const next = newGame({ ...s.config, rounds: 1 }, s.players, id, now);
+  if (s.game === 'chain') next.turn = other(s, s.winner || s.turn);
+  else {
+    next.giver = other(s, s.giver);
+    next.scores = { ...s.scores };
+  }
+  return next;
+}
 export function resolve(s, secret, now = Date.now()) {
   if (s.phase !== "pending" || !s.pending || !secret) return null;
   if (s.game === "reverse") return s.pending.kind === "timeout" ? judgeReverse(s, secret, false)

@@ -1916,3 +1916,8 @@ footer span {
 .layout-check .button { width: 100%; font-size: 14px; }
 .layout-check details, .layout-check a { display: block; font-size: 14px; margin-top: 16px; }
 .layout-check pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 40vh; overflow: auto; }
+
+.post-game-actions { width: 100%; max-width: 680px; margin: 24px auto 0; text-align: center; }
+.post-game-actions .form-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.post-game-actions p { margin-top: 14px; font-size: 14px; color: var(--muted); }
+@media (max-width: 600px) { .post-game-actions .form-buttons { grid-template-columns: 1fr; } }

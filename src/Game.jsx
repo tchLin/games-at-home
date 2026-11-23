@@ -11,9 +11,10 @@ import {
   Trophy,
   Heart,
 } from "lucide-react";
-import { db, ref, set } from "./firebase.js";
+import { db, ref, set, update } from "./firebase.js";
 import { GAMES, suggestions } from "./content.js";
-import { other, deadline, nextRound, chainMasks, normalize } from "./engine.js";
+import { other, deadline, nextRound, chainMasks, normalize, gameEnded } from "./engine.js";
+import { postGameUpdate } from './post-game.js';
 import { Dial } from "./art.jsx";
 import { spinTarget } from "./wheel.js";
 import { wordSuggestions } from "./word-links.js";
@@ -35,6 +36,8 @@ export default function Game(props) {
     base,
   } = props;
   const s = room.state;
+  const ended = gameEnded(s);
+  const finish = (choice) => act(() => update(ref(db), postGameUpdate(base, s, choice, crypto.randomUUID())));
   const previousState = useRef(null);
   useEffect(() => {
     const before = previousState.current;
@@ -128,7 +131,6 @@ export default function Game(props) {
             ))}
           </div>
           {s.game === "chain" && <ChainAnswers s={s} uid={uid} secret={mine} name={props.name} />}
-          <Notice>Use “Change game” above to choose the next game together.</Notice>
         </div>
       ) : (
         <div className="game-stage" key={`${s.id}-${s.round}`}>
@@ -161,16 +163,25 @@ export default function Game(props) {
           )}
         </div>
       )}
-      {s.phase === "reveal" && (
+      {ended ? <div className="post-game-actions">
+        {isHost ? <>
+          <div className="form-buttons">
+            <Button disabled={busy || !connected || !bothOnline} onClick={() => finish('again')}>
+              <RefreshCw size={18} />One more round
+            </Button>
+            <Button secondary disabled={busy || !connected} onClick={() => finish('lobby')}>Back to game selection</Button>
+          </div>
+          <p>{s.game === 'chain' ? 'Play a fresh word race with the same settings, or choose another game.'
+            : 'Keep your points and swap roles for one extra round, or choose another game.'}</p>
+        </> : <Notice>Your host can start one more round or take you both back to game selection.</Notice>}
+      </div> : s.phase === "reveal" && (
         <div className="round-footer">
           {isHost ? (
             <Button
               disabled={busy || !bothOnline}
               onClick={() => act(() => mutate((v) => nextRound(v, now), s))}
             >
-              {s.round >= s.config.rounds
-                ? "See how you did"
-                : "One more round"}
+              One more round
               <ArrowRight size={18} />
             </Button>
           ) : (

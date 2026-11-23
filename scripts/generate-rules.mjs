@@ -40,9 +40,12 @@ const config = {
   $other: { ".validate": false },
 };
 const guestReady = `root.child('rooms').child($slot).child('ready').child(${meta}.child('guest').val()).isNumber() && root.child('rooms').child($slot).child('ready').child(${meta}.child('guest').val()).val() > 0`;
+const endedState = (snapshot) => `(${snapshot}.child('phase').val() === 'finished' || (${snapshot}.child('phase').val() === 'reveal' && ${snapshot}.child('round').val() >= ${snapshot}.child('config').child('rounds').val()))`;
+const decision = "newData.parent().child('postGame')";
+const hostEncore = `${endedState('data')} && ${decision}.child('choice').val() === 'again' && ${decision}.child('gameId').val() === data.child('id').val() && ${decision}.child('nextId').val() === newData.child('id').val() && newData.child('game').val() === data.child('game').val()`;
 const state = {
   ".read": read,
-  ".write": `${write} && ((${host} && (!newData.exists() || (data.exists() && newData.child('id').val() === data.child('id').val()) || (${guestReady}))) || (data.exists() && newData.child('id').val() === data.child('id').val() && newData.child('game').val() === data.child('game').val() && newData.child('round').val() === data.child('round').val()))`,
+  ".write": `${write} && ((${host} && (!newData.exists() || (data.exists() && newData.child('id').val() === data.child('id').val()) || (${guestReady}) || (${hostEncore}))) || (data.exists() && newData.child('id').val() === data.child('id').val() && newData.child('game').val() === data.child('game').val() && newData.child('round').val() === data.child('round').val()))`,
   ".validate":
     "newData.hasChildren(['id','game','phase','config','round','players','scores','revision']) && newData.numChildren() <= 25",
   id: str(50),
@@ -265,6 +268,13 @@ const rules = {
       },
       state,
       gameChange,
+      postGame: {
+        '.read': read,
+        '.write': `${write} && ${host} && (!newData.exists() || (${endedState(matchState)} && newData.child('gameId').val() === ${matchState}.child('id').val()))`,
+        '.validate': `newData.hasChildren(['gameId','choice']) && !newData.parent().child('ready').exists() && !newData.parent().child('gameChange').exists() && ((newData.child('choice').val() === 'lobby' && !newData.hasChild('nextId') && !newData.parent().child('state').exists()) || (newData.child('choice').val() === 'again' && newData.child('nextId').val() !== newData.child('gameId').val() && newData.child('nextId').val() === newData.parent().child('state').child('id').val() && newData.parent().child('state').child('game').val() === ${matchState}.child('game').val()))`,
+        gameId: str(50), choice: { '.validate': "newData.val() === 'again' || newData.val() === 'lobby'" }, nextId: str(50),
+        $other: { '.validate': false },
+      },
       $other: { ".validate": false },
     },
   },
