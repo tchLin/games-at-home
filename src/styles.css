@@ -18,6 +18,10 @@
 body {
   margin: 0;
 }
+html, body, #root {
+  min-height: 100%;
+  width: 100%;
+}
 button,
 input,
 select {
@@ -50,6 +54,7 @@ button {
 input,
 select {
   width: 100%;
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 9px;
   padding: 13px 14px;
@@ -104,9 +109,16 @@ em {
   background: #e5bba4;
 }
 .page-shell {
-  max-width: 1240px;
-  margin: auto;
-  padding: 0 48px;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 0 clamp(16px, 3vw, 56px);
+}
+.page-shell > main {
+  flex: 1;
+  min-width: 0;
 }
 .site-header {
   display: flex;
@@ -158,7 +170,7 @@ em {
 }
 .hero {
   display: grid;
-  grid-template-columns: 1.24fr 1fr;
+  grid-template-columns: minmax(0, 1.24fr) minmax(0, 1fr);
   gap: 70px;
   align-items: center;
   padding: 65px 0 72px;
@@ -318,10 +330,11 @@ em {
   font-weight: 600;
 }
 .field {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
   margin-bottom: 16px;
 }
@@ -335,7 +348,7 @@ em {
 }
 .field input,
 .field select {
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 400;
 }
 .button {
@@ -349,7 +362,7 @@ em {
   background: var(--rust);
   color: #fffaf0;
   padding: 12px 20px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   transition:
     background 0.15s,
@@ -452,7 +465,7 @@ em {
 }
 .game-cards {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 22px;
 }
 .game-card {
@@ -504,6 +517,8 @@ em {
   height: 163px;
 }
 .game-card-copy {
+  min-width: 0;
+  overflow-wrap: anywhere;
   background: #fffcf6;
   padding: 21px 23px 17px;
   border-top: 1px solid #e4dacb;
@@ -640,6 +655,8 @@ footer span {
   color: inherit;
 }
 .room {
+  display: flex;
+  flex-direction: column;
   padding: 28px 0 20px;
 }
 .room-topline {
@@ -772,7 +789,7 @@ footer span {
 }
 .lobby-layout {
   display: grid;
-  grid-template-columns: 0.85fr 1.2fr;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.2fr);
   gap: 25px;
   align-items: start;
 }
@@ -848,7 +865,7 @@ footer span {
 }
 .settings-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 15px;
 }
 .settings-card .button {
@@ -943,6 +960,10 @@ footer span {
   animation: pulse 1s ease infinite alternate;
 }
 .play-area {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
   margin-top: 35px;
 }
 .game-heading {
@@ -959,6 +980,8 @@ footer span {
   font-size: 10px;
 }
 .game-stage {
+  flex: 1;
+  min-width: 0;
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 17px;
@@ -979,11 +1002,11 @@ footer span {
   overflow-wrap: anywhere;
 }
 .stage-title p {
-  font-size: 12px;
+  font-size: 16px;
   color: var(--muted);
 }
 .wheel-panel {
-  max-width: 400px;
+  width: min(100%, clamp(320px, 36vw, 660px));
   margin: 0 auto 24px;
 }
 .dial {
@@ -1067,7 +1090,7 @@ footer span {
   background: #eeeade;
   border: 1px solid #ded8c5;
   color: #948064;
-  font-size: 11px;
+  font-size: 14px;
   padding: 15px;
   border-radius: 10px;
   line-height: 1.7;
@@ -1142,7 +1165,7 @@ footer span {
 }
 .form-buttons > .button {
   flex: 1;
-  font-size: 11px;
+  font-size: 14px;
 }
 .saved-word-list {
   display: flex;
@@ -1165,7 +1188,7 @@ footer span {
 }
 .word-boards {
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
   gap: 30px;
   margin-top: 26px;
 }
@@ -1400,8 +1423,8 @@ footer span {
   }
 }
 @media (min-width: 1400px) {
-  .page-shell {
-    max-width: 1280px;
+  .game-cards {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
   .hero {
     gap: 100px;
@@ -1449,7 +1472,7 @@ footer span {
     height: 140px;
   }
   .lobby-layout {
-    grid-template-columns: 1fr 1.2fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
   }
   .lobby-game {
     gap: 0;
@@ -1670,6 +1693,8 @@ footer span {
     padding: 22px;
   }
   .game-heading {
+    flex-wrap: wrap;
+    align-items: flex-start;
     gap: 12px;
   }
   .game-heading h1 {
@@ -1687,7 +1712,7 @@ footer span {
     font-size: 28px;
   }
   .stage-title p {
-    font-size: 11px;
+    font-size: 16px;
   }
   .scale-labels {
     font-size: 11px;
@@ -1873,8 +1898,8 @@ footer span {
 .reverse-game .field { text-align: left; }
 .reverse-game .audio-actions { width: 100%; }
 .reverse-game .audio-actions > .button { width: 100%; max-width: 390px; min-height: 48px; }
-.reverse-game .form-buttons { display: flex; width: 100%; gap: 12px; flex-wrap: wrap; }
-.reverse-game .form-buttons .button { flex: 1 1 130px; }
+.reverse-game .form-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; gap: 12px; }
+.reverse-game .form-buttons .button { min-width: 0; }
 .reverse-game .audio-actions small { color: #766052; }
 @media (max-width: 600px) {
   .play-area.rose .game-heading { align-items: flex-start; gap: 12px; flex-wrap: wrap; }
