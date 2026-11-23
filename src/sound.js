@@ -16,14 +16,14 @@ export function createSoundPlayer({
   },
   storage = () => globalThis.localStorage,
 } = {}) {
-  let enabled = true;
+  let enabled = true, suppressed = false;
   try { enabled = storage()?.getItem('gah-sound') !== 'off'; } catch {}
   let context, master, lastPlay = -Infinity, lastKind;
   const isEnabled = () => enabled;
   const setEnabled = (value) => {
     enabled = Boolean(value);
     try { storage()?.setItem('gah-sound', enabled ? 'on' : 'off'); } catch {}
-    if (master) master.gain.value = enabled ? .2 : 0;
+    if (master) master.gain.value = enabled && !suppressed ? .2 : 0;
   };
   const unlock = async () => {
     if (!enabled) return;
@@ -32,14 +32,14 @@ export function createSoundPlayer({
         context = createContext();
         if (!context) return;
         master = context.createGain();
-        master.gain.value = .2;
+        master.gain.value = suppressed ? 0 : .2;
         master.connect(context.destination);
       }
       if (context.state !== 'running' && context.state !== 'closed') await context.resume();
     } catch { /* Audio support must never interrupt a game. */ }
   };
   const play = (kind = 'tap') => {
-    if (!enabled || context?.state !== 'running' || !master || !patterns[kind]) return false;
+    if (!enabled || suppressed || context?.state !== 'running' || !master || !patterns[kind]) return false;
     const now = context.currentTime;
     if (now - lastPlay < .07 && (kind === 'tap' || kind === lastKind)) return false;
     lastPlay = now;
@@ -63,7 +63,8 @@ export function createSoundPlayer({
       return true;
     } catch { return false; }
   };
-  return { isEnabled, setEnabled, unlock, play };
+  const setSuppressed = (value) => { suppressed = Boolean(value); if (master) master.gain.value = enabled && !suppressed ? .2 : 0; };
+  return { isEnabled, setEnabled, setSuppressed, unlock, play };
 }
 export const sounds = createSoundPlayer();
 export function soundInteraction(event) {

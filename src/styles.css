@@ -452,7 +452,7 @@ em {
 }
 .game-cards {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 22px;
 }
 .game-card {
@@ -1851,3 +1851,15 @@ footer span {
 .game-change-request { background: #f3ebdc; border: 1px solid #d9c9af; border-radius: 12px; padding: 20px; margin: 18px 0; }
 .game-change-request h2 { font-size: 24px; margin: 0 0 8px; }
 .game-change-request p { font-size: 14px; line-height: 1.6; }
+
+.game-card.rose, .lobby-game.rose { background: #f1dfda; }
+.reverse-game { text-align: center; }
+.reverse-game p, .reverse-game input { font-size: 16px; }
+.reverse-game small, .reverse-game .field-label { font-size: 14px; }
+.reverse-secret, .reverse-answer { display: grid; gap: 8px; margin: 28px auto; overflow-wrap: anywhere; }
+.reverse-secret span, .reverse-answer span { font-size: 14px; color: #766052; }
+.reverse-secret strong, .reverse-answer strong { font: 32px 'DM Serif Display', Georgia, serif; color: #985a50; }
+.audio-actions { display: flex; flex-direction: column; align-items: center; gap: 16px; max-width: 520px; margin: 24px auto; }
+.audio-actions p, .audio-actions small { margin: 0; line-height: 1.6; }
+.audio-actions .action-form { width: 100%; }
+.recording-status { color: #a4463c; font-weight: 700; }

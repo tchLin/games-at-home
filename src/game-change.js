@@ -21,6 +21,7 @@ export async function respondToGameChange(db, base, request, uid, accept) {
 export const completeGameChange = (db, base, request) => update(ref(db), {
   [`${base}/state`]: null,
   [`${base}/ready`]: null,
+  [`roundAudio/${base.split('/')[1]}`]: null,
   // Retain the request ID in this atomic write so the server can reject an
   // outdated completion instead of accidentally ending a newer game.
   [`${base}/gameChange`]: { ...request, completed: true },

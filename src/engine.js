@@ -43,6 +43,7 @@ export function newRound(s, now = Date.now()) {
   }
   if (s.game === "chain")
     return { ...common, phase: "setup", turn: s.players[0], boards: {} };
+  if (s.game === "reverse") return { ...common, recorded: false, plays: 0 };
   return { ...common, topicSeed: s.topicSeed, topicLabel: clueTopic(s.config, s.topicSeed, s.round), hints: [], attempts: [], hintIndex: 0, used: 0 };
 }
 export function newGame(config, players, id, now = Date.now()) {
@@ -66,6 +67,7 @@ export function nextRound(s, now = Date.now()) {
 }
 export function resolve(s, secret, now = Date.now()) {
   if (s.phase !== "pending" || !s.pending || !secret) return null;
+  if (s.game === "reverse") return s.pending.kind === "timeout" ? judgeReverse(s, secret, false) : null;
   const p = s.pending;
   const next = structuredClone(s);
   delete next.pending;
@@ -158,4 +160,14 @@ export function resolve(s, secret, now = Date.now()) {
     }
   }
   return next;
+}
+
+export function judgeReverse(s, secret, pass, skip = false) {
+  if (s.game !== 'reverse' || secret?.gameId !== s.id || secret.round !== s.round || !secret.word ||
+      (!skip && s.phase !== 'pending') || (skip && s.phase !== 'recording')) return null;
+  const correct = !skip && s.pending?.kind === 'guess' && Boolean(pass);
+  const points = correct ? 1 : 0;
+  return { ...s, phase: 'reveal', deadline: 0,
+    result: { word: secret.word, correct, points, timedOut: s.pending?.kind === 'timeout' },
+    scores: { ...s.scores, [other(s, s.giver)]: s.scores[other(s, s.giver)] + points } };
 }

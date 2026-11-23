@@ -19,6 +19,7 @@ import { spinTarget } from "./wheel.js";
 import { wordSuggestions } from "./word-links.js";
 import { playGameSound } from "./sound.js";
 import { Button, Field, Tag, Notice } from "./App.jsx";
+import ReverseGame from './ReverseGame.jsx';
 export default function Game(props) {
   const {
     room,
@@ -147,6 +148,8 @@ export default function Game(props) {
               disabled={disabled}
               send={send}
             />
+          ) : s.game === 'reverse' ? (
+            <ReverseGame {...props} s={s} secret={mine} disabled={disabled} send={send} />
           ) : (
             <Clues
               {...props}

@@ -23,6 +23,13 @@ export const GAMES = {
     time: "5–10 min",
     color: "butter",
   },
+  reverse: {
+    name: "Backwards & Forwards",
+    tag: "A little backwards. A lot of laughs.",
+    description: "Copy a backwards word in one take. Flip your voice and let your person guess.",
+    time: "5–10 min",
+    color: "rose",
+  },
 };
 export const WHEEL_TOPICS = {
   pokemon: {
@@ -218,6 +225,7 @@ export const DEFAULT_SETTINGS = {
   timer: 0,
   wordCount: 5,
   guessesPerHint: 2,
+  reverseSyllables: 1,
   category: "Everyday",
   topic: "surprise",
   left: "Ugly Pokémon",

@@ -15,11 +15,12 @@ import {
   runTransaction,
   remove,
 } from "firebase/database";
-import { newGame, resolve, maskWord, chainMasks, revealChain } from "../src/engine.js";
+import { newGame, nextRound, resolve, maskWord, chainMasks, revealChain, judgeReverse } from "../src/engine.js";
 import { DEFAULT_SETTINGS } from "../src/content.js";
 import { requestGameChange, respondToGameChange, completeGameChange } from "../src/game-change.js";
 import { lobbyStartUpdate } from "../src/lobby.js";
 import { joinRoom } from "../src/rooms.js";
+import { reverseWav, toBase64 } from '../src/reverse-audio.js';
 let env;
 const token = (email) => ({
   email,
@@ -412,4 +413,91 @@ test("change-game requests cannot be forged by outsiders or tied to another matc
   await assertFails(get(ref(outsider(), "rooms/1/gameChange")));
   await assertFails(set(ref(g(), "rooms/1/gameChange/extra"), "unbounded"));
   await assert.rejects(requestGameChange(h(), "rooms/1", state.id, "host"), /already a change-game request/);
+});
+
+async function reverseFixture() {
+  const state = newGame({ ...DEFAULT_SETTINGS, game: 'reverse', reverseSyllables: 2 }, ['host','guest'], 'reverse-match');
+  const secret = { gameId: state.id, round: 1, word: 'banana' };
+  const clip = { roomCode: '1ABCDEFG', gameId: state.id, round: 1, owner: 'host',
+    data: toBase64(reverseWav([new Float32Array(1200).fill(.2)], 12000)) };
+  await assertSucceeds(set(ref(h(), 'rooms/1/state'), state));
+  await assertSucceeds(set(ref(h(), 'secrets/1/host'), secret));
+  return { state, secret, clip };
+}
+test('reverse audio is private, bounded, and uploadable once by the recording player', async () => {
+  const { state, clip } = await reverseFixture();
+  clip.data = toBase64(reverseWav([new Float32Array(12000 * 8).fill(.2)], 12000));
+  await assertFails(set(ref(h(), 'roundAudio/1'), clip));
+  await assertFails(set(ref(g(), 'rooms/1/state'), { ...state, recorded: true, phase: 'recording' }));
+  const recording = { ...state, recorded: true, phase: 'recording' };
+  await assertSucceeds(set(ref(h(), 'rooms/1/state'), recording));
+  await assertFails(set(ref(g(), 'roundAudio/1'), { ...clip, owner: 'guest' }));
+  await assertFails(set(ref(h(), 'roundAudio/1'), { ...clip, roomCode: '1WRONGGG' }));
+  await assertFails(set(ref(h(), 'roundAudio/1'), { ...clip, round: 2 }));
+  await assertFails(set(ref(h(), 'roundAudio/1'), { ...clip, data: 'UklGR' + 'a'.repeat(256060) }));
+  await assertFails(set(ref(h(), 'roundAudio/1'), { ...clip, data: 'https://attacker.example/audio.wav' }));
+  await assertSucceeds(set(ref(h(), 'roundAudio/1'), clip));
+  await assertFails(set(ref(h(), 'roundAudio/1'), clip));
+  await assertFails(remove(ref(h(), 'roundAudio/1')));
+  await assertFails(set(ref(h(), 'rooms/1/state'), state));
+  assert.equal((await assertSucceeds(get(ref(g(), 'roundAudio/1')))).val().data, clip.data);
+  await assertFails(get(ref(outsider(), 'roundAudio/1')));
+  await assertFails(get(ref(g(), 'roundAudio')));
+  await assertFails(get(ref(g(), 'secrets/1/host')));
+});
+test('reverse permits three listens and one guess; only giver can pass and roles alternate', async () => {
+  let { state, secret, clip } = await reverseFixture();
+  state = { ...state, phase: 'recording', recorded: true };
+  await assertSucceeds(set(ref(h(), 'rooms/1/state'), state));
+  await assertFails(set(ref(h(), 'rooms/1/state'), { ...state, phase: 'guess' }));
+  await assertSucceeds(set(ref(h(), 'roundAudio/1'), clip));
+  state = { ...state, phase: 'guess' };
+  await assertSucceeds(set(ref(h(), 'rooms/1/state'), state));
+  await assertFails(set(ref(h(), 'rooms/1/state'), { ...state, plays: 1 }));
+  for (let i = 1; i <= 3; i++) {
+    state = { ...state, plays: i };
+    await assertSucceeds(set(ref(g(), 'rooms/1/state'), state));
+  }
+  await assertFails(set(ref(g(), 'rooms/1/state'), { ...state, plays: 4 }));
+  await assertFails(set(ref(g(), 'rooms/1/state'), { ...state, plays: 0 }));
+  await assertFails(set(ref(h(), 'rooms/1/state'), { ...state, phase: 'pending', pending: { actor: 'guest', kind: 'guess', value: 'banana' } }));
+  state = { ...state, phase: 'pending', pending: { actor: 'guest', kind: 'guess', value: 'bananna' } };
+  await assertSucceeds(set(ref(g(), 'rooms/1/state'), state));
+  await assertFails(set(ref(g(), 'rooms/1/state'), { ...state, pending: { ...state.pending, value: 'apple' } }));
+  await assertFails(set(ref(g(), 'rooms/1/state'), { ...state, phase: 'guess' }));
+  const passed = judgeReverse(state, secret, true);
+  await assertFails(set(ref(g(), 'rooms/1/state'), passed));
+  await assertSucceeds(set(ref(h(), 'rooms/1/state'), passed));
+  const next = nextRound(passed);
+  await assertSucceeds(set(ref(h(), 'rooms/1/state'), next));
+  await assertFails(get(ref(g(), 'roundAudio/1')));
+  await assertSucceeds(remove(ref(h(), 'roundAudio/1')));
+  assert.equal(next.giver, 'guest');
+  await assertSucceeds(set(ref(g(), 'secrets/1/guest'), { gameId: state.id, round: 2, word: 'coffee' }));
+  await assertSucceeds(set(ref(g(), 'rooms/1/state'), { ...next, recorded: true, phase: 'recording' }));
+  await assertSucceeds(set(ref(g(), 'roundAudio/1'), { ...clip, owner: 'guest', round: 2 }));
+});
+test('reverse timeout and skip reveal for zero; game change deletes the recording', async () => {
+  let { state, secret, clip } = await reverseFixture();
+  state = { ...state, recorded: true, phase: 'recording' };
+  await assertSucceeds(set(ref(h(), 'rooms/1/state'), state));
+  await assertSucceeds(set(ref(h(), 'roundAudio/1'), clip));
+  state = { ...state, phase: 'guess', deadline: Date.now() - 1000 };
+  await assertSucceeds(set(ref(h(), 'rooms/1/state'), state));
+  state = { ...state, phase: 'pending', deadline: 0, pending: { actor: 'guest', kind: 'timeout' } };
+  await assertSucceeds(set(ref(h(), 'rooms/1/state'), state));
+  await assertSucceeds(set(ref(h(), 'rooms/1/state'), resolve(state, secret)));
+  await requestGameChange(g(), 'rooms/1', state.id, 'guest');
+  const request = (await get(ref(h(), 'rooms/1/gameChange'))).val();
+  await respondToGameChange(h(), 'rooms/1', request, 'host', true);
+  await assertSucceeds(completeGameChange(h(), 'rooms/1', { ...request, accepted: true }));
+  await env.withSecurityRulesDisabled(async (c) => assert.equal((await get(ref(c.database(), 'roundAudio/1'))).val(), null));
+  await assertSucceeds(set(ref(g(), 'rooms/1/ready/guest'), 1));
+  const match = newGame({ ...DEFAULT_SETTINGS, game: 'reverse' }, ['host','guest'], 'skip-match');
+  await assertSucceeds(set(ref(h(), 'rooms/1/state'), match));
+  const recording = { ...match, recorded: true, phase: 'recording' };
+  const target = { gameId: match.id, round: 1, word: 'cat' };
+  await assertSucceeds(set(ref(h(), 'secrets/1/host'), target));
+  await assertSucceeds(set(ref(h(), 'rooms/1/state'), recording));
+  await assertSucceeds(set(ref(h(), 'rooms/1/state'), judgeReverse(recording, target, false, true)));
 });

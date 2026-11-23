@@ -58,6 +58,12 @@ export function useRoom(code, uid, onError) {
   }, [code, uid]);
   const now = tick + offset;
   const isHost = room.meta?.host === uid;
+  useEffect(() => {
+    if (!isHost || !connected || !room.state) return;
+    // Rules only permit removing a stale clip, so a slow cleanup cannot delete
+    // a recording that has already arrived for the new round.
+    Promise.resolve(remove(ref(db, `roundAudio/${slotOf(code)}`))).catch(() => {});
+  }, [isHost, connected, code, room.state?.id, room.state?.round]);
   const valid = room.meta?.code === code && room.meta?.open;
   const bothOnline = Boolean(
     room.meta?.guest &&
@@ -145,7 +151,7 @@ export function useRoom(code, uid, onError) {
         return;
       }
       const judge = s.game === "chain" ? other(s, s.pending?.actor) : s.giver;
-      if (s.phase === "pending" && judge === uid && mySecret) {
+      if (s.phase === "pending" && judge === uid && mySecret && (s.game !== 'reverse' || s.pending?.kind === 'timeout')) {
         await mutate((v) => resolve(v, mySecret, now), s);
         return;
       }

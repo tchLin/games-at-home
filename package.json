@@ -5,7 +5,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test tests/engine.test.js tests/sound.test.js",
+    "test": "node --test tests/engine.test.js tests/sound.test.js tests/reverse.test.js",
     "rules:generate": "node scripts/generate-rules.mjs",
     "test:rules": "firebase emulators:exec --only database --project demo-games-at-home \"node --test tests/rules.test.js\"",
     "test:ui": "vitest run tests/ui.test.jsx",
@@ -14,7 +14,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "Three cozy realtime games for two, with reserved seats and free Firebase hosting infrastructure.",
+  "description": "Four cozy realtime games for two, with reserved seats and free Firebase hosting infrastructure.",
   "dependencies": {
     "@fontsource/dm-sans": "^5.3.0",
     "@fontsource/dm-serif-display": "^5.3.0",

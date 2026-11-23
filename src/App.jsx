@@ -443,7 +443,7 @@ function Home({
             <span className="eyebrow">THE LITTLE GAME COLLECTION</span>
             <h2>What are we playing tonight?</h2>
           </div>
-          <span className="subtle">Three ways to spend time together.</span>
+          <span className="subtle">Four ways to spend time together.</span>
         </div>
         <div className="game-cards">
           {Object.entries(GAMES).map(([id, g], i) => (
@@ -515,6 +515,12 @@ function Home({
           reveals them.
         </p>
         <p>
+          Backwards &amp; Forwards uses your microphone only when you choose to record.
+          The short recording is shared with your room partner and removed when
+          the host advances the round, changes games, or ends the room. Headphones
+          help keep practice private when you’re also on a call.
+        </p>
+        <p>
           Rooms remain available for rejoining until the host ends them.
           Abandoned rooms expire after 24 hours without an active host. Game
           seats are limited; free service availability is not guaranteed.
@@ -528,7 +534,7 @@ function Room({ code, user, onHome, report, act, busy }) {
   const { room, isHost, valid, connected, bothOnline, base, now } = session;
   const [copied, setCopied] = useState(false),
     [leaving, setLeaving] = useState(false);
-  const settings = room.settings || DEFAULT_SETTINGS;
+  const settings = { ...DEFAULT_SETTINGS, ...room.settings };
   const name = (uid) => room.players?.[uid]?.name || "Your person";
   async function copy() {
     try {
@@ -543,7 +549,7 @@ function Room({ code, user, onHome, report, act, busy }) {
   }
   async function leave() {
     await act(async () => {
-      if (isHost) await set(ref(db, `${base}/meta/open`), false);
+      if (isHost) await update(ref(db), { [`${base}/meta/open`]: false, [`roundAudio/${base.split('/')[1]}`]: null });
       onHome();
     });
   }
@@ -794,6 +800,11 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
                   </select>
                 </Field>
               )}
+              {cfg.game === 'reverse' && <Field label="Word difficulty">
+                <select value={cfg.reverseSyllables || 1} onChange={(e) => change('reverseSyllables', +e.target.value)}>
+                  {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n} syllable{n === 1 ? '' : 's'} · {['Easy', 'Medium', 'Tricky', 'Challenge'][n - 1]}</option>)}
+                </select>
+              </Field>}
               {cfg.game === "clues" && (
                 <Field label="Guesses per hint">
                   <select
@@ -842,7 +853,9 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
                 ? "The system gives a topic and a pair of opposites. Spin to see a hidden 1–2–3–4–3–2–1 scoring band. Name something in that topic that would lead your partner to the 4-point zone. They place the needle, then you reveal and score. Swap roles each round."
                 : cfg.game === "chain"
                   ? "Build a secret chain: every neighboring pair must form a meaningful connection, like coffee → shop → window → shopping → cart. Suggestions follow the word you type. Only the first word starts with a visible initial. All other letters require a hint. Correct guesses keep your turn; wrong guesses or letter hints pass it. Both chains and each word’s guess history are shown at the end. First to solve the other chain wins."
-                  : "Choose a word that fits the topic, then give the first single-word hint. Your partner gets two guesses by default (adjustable above). Review their guesses before tailoring each next hint. Up to three hints; a correct guess ends the round. Swap roles each round."}
+                  : cfg.game === 'reverse'
+                    ? "Get a secret word and listen to its backwards pronunciation. Imitate it in one recording (up to 8 seconds). Your partner hears your recording flipped around, with up to three listens and one guess. The word holder marks Pass or No pass, so spelling can be flexible. A pass earns the listener one point. Swap roles each round. Microphone permission is needed; headphones help when you’re on a call."
+                    : "Choose a word that fits the topic, then give the first single-word hint. Your partner gets two guesses by default (adjustable above). Review their guesses before tailoring each next hint. Up to three hints; a correct guess ends the round. Swap roles each round."}
             </p>
             <small>
               Timers apply to guessing. Preparation is untimed. The clock pauses

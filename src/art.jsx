@@ -159,6 +159,15 @@ export function ClueArt() {
   );
 }
 export function GameArt({ game }) {
+  if (game === 'reverse') return <svg viewBox="0 0 300 190" aria-hidden="true">
+    <ellipse cx="150" cy="161" rx="84" ry="12" fill="#d9b8b1" opacity=".3" />
+    <rect x="122" y="32" width="56" height="92" rx="28" fill="#bb756d" />
+    <path d="M108 91v9a42 42 0 0 0 84 0v-9M150 143v19M130 163h40" fill="none" stroke="#724e4b" strokeWidth="7" strokeLinecap="round" />
+    {[0,1,2].map((i) => <g key={i} stroke="#bb756d" strokeWidth="5" strokeLinecap="round">
+      <path d={`M${84-i*15} ${73+i*7}v${43-i*14}`} /><path d={`M${216+i*15} ${73+i*7}v${43-i*14}`} />
+    </g>)}
+    <path d="M136 59h28M136 73h28M136 87h28" stroke="#f7e7df" strokeWidth="4" strokeLinecap="round" />
+  </svg>;
   return game === "wheel" ? (
     <WheelArt />
   ) : game === "chain" ? (

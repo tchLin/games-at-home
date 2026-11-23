@@ -39,10 +39,11 @@ import App, { Lobby } from "../src/App.jsx";
 import Game from "../src/Game.jsx";
 import { GameChangeControls } from "../src/GameChangeControls.jsx";
 import { useRoom } from "../src/useRoom.js";
+import * as reverseAudio from '../src/reverse-audio.js';
 import * as gameChangeActions from "../src/game-change.js";
 import { newGame, chainMasks } from "../src/engine.js";
 import { DEFAULT_SETTINGS } from "../src/content.js";
-import { set, identity, guestLogin, createRoom, joinRoom, login, update, onValue, presence } from "../src/firebase.js";
+import { set, get, identity, guestLogin, createRoom, joinRoom, login, update, onValue, presence } from "../src/firebase.js";
 beforeEach(() => {
   identity.mockResolvedValue(null);
   createRoom.mockResolvedValue("1ABCDEFG");
@@ -50,6 +51,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
   localStorage.clear();
   history.replaceState({}, "", "/");
 });
@@ -76,10 +78,10 @@ const props = (game, overrides = {}) => ({
   ...overrides,
 });
 describe("cozy home and game forms", () => {
-  it("shows the three games with guest play and optional Google sign-in", async () => {
+  it("shows the four games with guest play and optional Google sign-in", async () => {
     render(<App />);
     expect(screen.getByRole("heading", { name: /Good company/ })).toBeTruthy();
-    for (const name of ["Blind Wheel", "Word by Word", "Three Little Clues"])
+    for (const name of ["Blind Wheel", "Word by Word", "Three Little Clues", "Backwards & Forwards"])
       expect(screen.getByRole("heading", { name })).toBeTruthy();
     await waitFor(() =>
       expect(
@@ -402,4 +404,90 @@ it("the host automatically completes an accepted request and receives the lobby 
     onValue.mockImplementation(() => () => {});
     presence.mockImplementation(() => () => {});
   }
+});
+
+describe('Backwards & Forwards', () => {
+  const make = (phase = 'prepare', overrides = {}) => {
+    const p = props('reverse', overrides);
+    p.room = { ...p.room, meta: { code: '1ABCDEFG' }, state: { ...p.room.state, phase } };
+    return p;
+  };
+  it('shows the secret only to its holder and offers a single take', () => {
+    const p = make();
+    p.secret = { gameId: p.room.state.id, round: 1, word: 'banana' };
+    const { rerender } = render(<Game {...p} />);
+    expect(screen.getByText('banana')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Hear it backwards/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Record my one take/ })).toBeTruthy();
+    rerender(<Game {...p} uid="guest" secret={null} />);
+    expect(screen.queryByText('banana')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Record my one take/ })).toBeNull();
+  });
+  it('keeps a spent recording spent after rejoining and offers recovery or skip', () => {
+    const p = make('recording');
+    p.room.state.recorded = true;
+    p.secret = { gameId: p.room.state.id, round: 1, word: 'banana' };
+    render(<Game {...p} />);
+    expect(screen.queryByRole('button', { name: /Record my one take/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /Recover saved recording/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Skip round/ })).toBeTruthy();
+  });
+  it('disables a fourth playback and locks the one guess for manual judgement', async () => {
+    const p = make('guess', { uid: 'guest', isHost: false });
+    p.room.state.plays = 3;
+    p.room.state.recorded = true;
+    const { rerender } = render(<Game {...p} />);
+    expect(screen.getByRole('button', { name: /Listen · 0 left/ }).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Your one guess'), { target: { value: 'bananna' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit my guess' }));
+    await waitFor(() => expect(p.mutate).toHaveBeenCalled());
+    const pending = p.mutate.mock.calls[0][0](p.room.state);
+    expect(pending.phase).toBe('pending');
+    expect(pending.pending.value).toBe('bananna');
+    p.room.state = pending;
+    rerender(<Game {...p} />);
+    expect(screen.queryByLabelText('Your one guess')).toBeNull();
+    expect(screen.getByText(/Waiting for Alex to mark Pass or No pass/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Pass' })).toBeNull();
+    rerender(<Game {...p} uid="host" secret={{ gameId: pending.id, round: 1, word: 'banana' }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Pass' }));
+    const result = p.mutate.mock.calls.at(-1)[0](pending);
+    expect(result.result.correct).toBe(true);
+    expect(result.scores.guest).toBe(1);
+  });
+  it('decodes a clip before claiming playback, and the counter survives rerender', async () => {
+    const ctx = { resume: vi.fn(async () => {}), close: vi.fn(async () => {}) };
+    vi.spyOn(reverseAudio, 'audioContext').mockReturnValue(ctx);
+    vi.spyOn(reverseAudio, 'decode').mockResolvedValue({ duration: 1 });
+    const play = vi.spyOn(reverseAudio, 'playBuffer').mockImplementation((c, b, ended) => { ended(); return vi.fn(); });
+    const p = make('guess', { uid: 'guest', isHost: false });
+    get.mockResolvedValue({ val: () => ({ gameId: p.room.state.id, round: 1, data: 'AAAA' }) });
+    const { rerender } = render(<Game {...p} />);
+    fireEvent.click(screen.getByRole('button', { name: /Listen · 3 left/ }));
+    await waitFor(() => expect(play).toHaveBeenCalledTimes(1));
+    p.room.state = p.mutate.mock.calls[0][0](p.room.state);
+    expect(p.room.state.plays).toBe(1);
+    rerender(<Game {...p} />);
+    expect(screen.getByRole('button', { name: /Listen · 2 left/ })).toBeTruthy();
+  });
+  it('claims one take, stops the mic, reverses samples and uploads a room-bound clip', async () => {
+    const ctx = { resume: vi.fn(async () => {}), close: vi.fn(async () => {}) };
+    vi.spyOn(reverseAudio, 'audioContext').mockReturnValue(ctx);
+    vi.spyOn(reverseAudio, 'decode').mockResolvedValue({ numberOfChannels: 1, sampleRate: 12000, getChannelData: () => new Float32Array([.1,.2,.3]) });
+    let finish;
+    const mic = { start: vi.fn(() => new Promise((resolve) => { finish = resolve; })), stop: vi.fn(() => finish({ arrayBuffer: async () => new ArrayBuffer(8) })), cancel: vi.fn() };
+    vi.spyOn(reverseAudio, 'microphone').mockResolvedValue(mic);
+    const p = make();
+    p.secret = { gameId: p.room.state.id, round: 1, word: 'banana' };
+    const { rerender } = render(<Game {...p} />);
+    fireEvent.click(screen.getByRole('button', { name: /Record my one take/ }));
+    await waitFor(() => expect(mic.start).toHaveBeenCalledTimes(1));
+    p.room.state = p.mutate.mock.calls[0][0](p.room.state);
+    expect(p.room.state.recorded).toBe(true);
+    rerender(<Game {...p} busy />);
+    fireEvent.click(screen.getByRole('button', { name: 'Stop and send' }));
+    await waitFor(() => expect(set).toHaveBeenCalledWith('roundAudio/1', expect.objectContaining({ roomCode: '1ABCDEFG', owner: 'host', round: 1, data: expect.stringMatching(/^UklGR/) })));
+    expect(mic.cancel).toHaveBeenCalled();
+    expect(p.mutate.mock.calls.at(-1)[0](p.room.state).phase).toBe('guess');
+  });
 });

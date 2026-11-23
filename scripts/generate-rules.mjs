@@ -25,12 +25,13 @@ const config = {
     "newData.hasChildren(['game','rounds','timer','wordCount','guessesPerHint','category','topic','left','right','version'])",
   game: {
     ".validate":
-      "newData.val() === 'wheel' || newData.val() === 'chain' || newData.val() === 'clues'",
+      "newData.val() === 'wheel' || newData.val() === 'chain' || newData.val() === 'clues' || newData.val() === 'reverse'",
   },
   rounds: num(1, 20),
   timer: num(0, 300),
   wordCount: num(3, 12),
   guessesPerHint: num(1, 5),
+  reverseSyllables: { '.validate': "newData.val() === 1 || newData.val() === 2 || newData.val() === 3 || newData.val() === 4" },
   category: str(30),
   topic: str(20),
   left: str(60),
@@ -48,7 +49,7 @@ const state = {
   game: str(10),
   phase: {
     ".validate":
-      "newData.val() === 'prepare' || newData.val() === 'clue' || newData.val() === 'guess' || newData.val() === 'pending' || newData.val() === 'reveal' || newData.val() === 'setup' || newData.val() === 'hint' || newData.val() === 'finished'",
+      "newData.val() === 'prepare' || newData.val() === 'clue' || newData.val() === 'guess' || newData.val() === 'pending' || newData.val() === 'reveal' || newData.val() === 'setup' || newData.val() === 'hint' || newData.val() === 'finished' || newData.val() === 'recording'",
   },
   config,
   round: num(1, 20),
@@ -65,6 +66,8 @@ const state = {
   clue: str(100),
   hintIndex: num(0, 3),
   used: num(0, 5),
+  recorded: bool,
+  plays: { '.validate': 'newData.val() === 0 || newData.val() === 1 || newData.val() === 2 || newData.val() === 3' },
   players: {
     ".validate": `newData.numChildren() === 2 && newData.child('0').val() === ${meta}.child('host').val() && newData.child('1').val() === ${meta}.child('guest').val()`,
   },
@@ -151,6 +154,40 @@ const state = {
   $other: { ".validate": false },
 };
 const matchState = "root.child('rooms').child($slot).child('state')";
+const clip = "root.child('roundAudio').child($slot)";
+const giverSecret = `root.child('secrets').child($slot).child(data.child('giver').val())`;
+const equalChildren = (path, keys) => keys.map((key) => `newData.child('${path}').child('${key}').val() === data.child('${path}').child('${key}').val()`).join(' && ');
+const sameConfig = equalChildren('config', Object.keys(config).filter((key) => !key.startsWith('.') && !key.startsWith('$')));
+const samePending = equalChildren('pending', ['actor', 'kind', 'value', 'index']);
+const sameRound = "newData.child('id').val() === data.child('id').val() && newData.child('round').val() === data.child('round').val()";
+const isGiver = "auth.uid === data.child('giver').val()";
+const phase = (value, source = 'data') => `${source}.child('phase').val() === '${value}'`;
+// Preserve the one take, three listens and one guess across refreshes/tabs.
+// Room members can still access their clip bytes: this is a game rule, not DRM.
+state['.validate'] += ` && (newData.child('game').val() !== 'reverse' || (
+  newData.hasChildren(['recorded','plays','giver']) && (
+    ((!data.exists() || !(${sameRound})) && ${host} && ${phase('prepare', 'newData')} && newData.child('recorded').val() === false && newData.child('plays').val() === 0 &&
+      (!data.exists() || newData.child('id').val() !== data.child('id').val() || (${phase('reveal')} && newData.child('round').val() === data.child('round').val() + 1))) ||
+    ((${sameRound}) && newData.child('giver').val() === data.child('giver').val() && (${sameConfig}) &&
+      (newData.child('recorded').val() === data.child('recorded').val() || (${phase('prepare')} && ${phase('recording','newData')} && ${isGiver} && newData.child('recorded').val() === true)) &&
+      (newData.child('plays').val() === data.child('plays').val() || (${phase('guess')} && ${phase('guess','newData')} && !(${isGiver}) && newData.child('plays').val() === data.child('plays').val() + 1)) &&
+      (!data.hasChild('pending') || (${samePending})) &&
+      (newData.child('phase').val() === data.child('phase').val() ||
+        (${phase('prepare')} && ${phase('recording','newData')} && ${isGiver} && newData.child('recorded').val() === true) ||
+        (${phase('recording')} && ${phase('guess','newData')} && ${isGiver} && ${clip}.child('gameId').val() === data.child('id').val() && ${clip}.child('round').val() === data.child('round').val()) ||
+        (${phase('guess')} && ${phase('pending','newData')} && newData.child('pending').child('actor').val() !== data.child('giver').val() &&
+          ((newData.child('pending').child('kind').val() === 'guess' && !(${isGiver}) && newData.child('pending').child('actor').val() === auth.uid && newData.child('pending').child('value').isString() && newData.child('pending').child('value').val().length > 0) ||
+          (newData.child('pending').child('kind').val() === 'timeout' && ${host} && data.child('deadline').val() > 0 && data.child('deadline').val() <= now))) ||
+        ((${phase('pending')} || ${phase('recording')}) && ${phase('reveal','newData')} && ${isGiver} &&
+          newData.child('result').child('word').val() === ${giverSecret}.child('word').val() && ${giverSecret}.child('gameId').val() === data.child('id').val() && ${giverSecret}.child('round').val() === data.child('round').val() &&
+          ((newData.child('result').child('points').val() === 1 && newData.child('result').child('correct').val() === true && data.child('pending').child('kind').val() === 'guess') ||
+          (newData.child('result').child('points').val() === 0 && newData.child('result').child('correct').val() === false))) ||
+        (${phase('reveal')} && ${phase('finished','newData')} && ${host})) &&
+      (!newData.hasChild('result') || ${phase('reveal','newData')} || ${phase('finished','newData')}) &&
+      ((${samePending}) || (${phase('guess')} && ${phase('pending','newData')}))
+    )
+  )
+))`;
 const sameRequest = "newData.child('gameId').val() === data.child('gameId').val() && newData.child('requestId').val() === data.child('requestId').val() && newData.child('requestedBy').val() === data.child('requestedBy').val()";
 const currentRequest = `data.child('gameId').val() === ${matchState}.child('id').val()`;
 const gameChange = {
@@ -251,6 +288,16 @@ const rules = {
         },
         $other: { ".validate": false },
       },
+    },
+  },
+  roundAudio: {
+    $slot: {
+      '.read': `${write} && ${matchState}.child('game').val() === 'reverse' && (!data.exists() || (data.child('roomCode').val() === ${meta}.child('code').val() && data.child('gameId').val() === ${matchState}.child('id').val() && data.child('round').val() === ${matchState}.child('round').val()))`,
+      '.write': `${allowed} && ((${host} && !newData.exists() && (newData.parent().parent().child('rooms').child($slot).child('meta').child('open').val() !== true || data.child('roomCode').val() !== ${meta}.child('code').val() || data.child('gameId').val() !== newData.parent().parent().child('rooms').child($slot).child('state').child('id').val() || data.child('round').val() !== newData.parent().parent().child('rooms').child($slot).child('state').child('round').val())) || (${active} && ${member} && ${matchState}.child('game').val() === 'reverse' && ${matchState}.child('phase').val() === 'recording' && ${matchState}.child('recorded').val() === true && ${matchState}.child('giver').val() === auth.uid && newData.exists() && (!data.exists() || data.child('roomCode').val() !== ${meta}.child('code').val() || data.child('gameId').val() !== ${matchState}.child('id').val() || data.child('round').val() !== ${matchState}.child('round').val())))`,
+      '.validate': `newData.hasChildren(['roomCode','gameId','round','owner','data']) && newData.child('roomCode').val() === ${meta}.child('code').val() && newData.child('gameId').val() === ${matchState}.child('id').val() && newData.child('round').val() === ${matchState}.child('round').val() && newData.child('owner').val() === auth.uid`,
+      roomCode: str(8), gameId: str(50), round: num(1,20), owner: str(128),
+      data: { '.validate': "newData.isString() && newData.val().length >= 64 && newData.val().length <= 256060 && newData.val().beginsWith('UklGR') && newData.val().matches(/^[A-Za-z0-9+\\/=]+$/)" },
+      $other: { '.validate': false },
     },
   },
 };
