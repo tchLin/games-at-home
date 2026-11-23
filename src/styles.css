@@ -1855,7 +1855,10 @@ footer span {
 .game-card.rose, .lobby-game.rose { background: #f1dfda; }
 .reverse-game { text-align: center; }
 .reverse-game p, .reverse-game input { font-size: 16px; }
-.reverse-game small, .reverse-game .field-label { font-size: 14px; }
+.reverse-game small, .reverse-game .field > span, .reverse-game .button,
+.play-area.rose .tag, .lobby-game.rose small { font-size: 14px; }
+.settings-grid:has([name="reverse-syllables"]) .field { font-size: 14px; }
+.settings-grid:has([name="reverse-syllables"]) select { font-size: 16px; }
 .reverse-secret, .reverse-answer { display: grid; gap: 8px; margin: 28px auto; overflow-wrap: anywhere; }
 .reverse-secret span, .reverse-answer span { font-size: 14px; color: #766052; }
 .reverse-secret strong, .reverse-answer strong { font: 32px 'DM Serif Display', Georgia, serif; color: #985a50; }

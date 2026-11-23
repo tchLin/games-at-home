@@ -801,7 +801,7 @@ export function Lobby({ room, settings, uid, isHost, base, act, busy, bothOnline
                 </Field>
               )}
               {cfg.game === 'reverse' && <Field label="Word difficulty">
-                <select value={cfg.reverseSyllables || 1} onChange={(e) => change('reverseSyllables', +e.target.value)}>
+                <select name="reverse-syllables" value={cfg.reverseSyllables || 1} onChange={(e) => change('reverseSyllables', +e.target.value)}>
                   {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n} syllable{n === 1 ? '' : 's'} · {['Easy', 'Medium', 'Tricky', 'Challenge'][n - 1]}</option>)}
                 </select>
               </Field>}
