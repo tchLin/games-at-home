@@ -1,3 +1,4 @@
+import { MAX_LISTENS } from '../src/audio-limits.js';
 // Fixed seat fields and bounded private submissions keep limits enforceable in
 // RTDB rules (which have no child-count operation).
 export function multiplayerRules(rules, c) {
@@ -82,7 +83,7 @@ export function multiplayerRules(rules, c) {
       '.read': `${write} && ${current} && (auth.uid === $uid || auth.uid === ${s}.child('giver').val())`,
       '.write': own,
       '.validate': `${memberFor('$uid')} && ${preserveEntries} && (!data.hasChild('plays') || newData.hasChild('plays'))`,
-      plays: { '.validate': `${s}.child('game').val() === 'reverse' && newData.isNumber() && newData.val() >= 1 && newData.val() <= 3 && ((!data.exists() && newData.val() === 1) || newData.val() === data.val() || newData.val() === data.val() + 1)` },
+      plays: { '.validate': `${s}.child('game').val() === 'reverse' && newData.isNumber() && newData.val() >= 1 && newData.val() <= ${MAX_LISTENS} && ((!data.exists() && newData.val() === 1) || newData.val() === data.val() || newData.val() === data.val() + 1)` },
       entries: { $i: {
         '.validate': `$i.matches(/^([0-9]|1[0-4])$/) && newData.hasChildren(['value','hint']) && (data.exists() || ($i === ('' + ${s}.child('progress').child($uid).child('count').val()) && (${s}.child('game').val() === 'clues' ? (${s}.child('progress').child($uid).child('used').val() < ${s}.child('config').child('guessesPerHint').val() && newData.child('hint').val() === ${s}.child('hintIndex').val()) : ($i === '0' && newData.child('hint').val() === 0))))`,
         value: { '.validate': `(${s}.child('game').val() === 'wheel' ? (newData.isNumber() && newData.val() >= 0 && newData.val() <= 100) : (newData.isString() && newData.val().length > 0 && newData.val().length <= 80))` },

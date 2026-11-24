@@ -1,29 +1,68 @@
-// Audio stays on the device until a single, bounded WAV is shared with the room.
-export const RECORD_SECONDS = 8;
-export const SAMPLE_RATE = 12000;
-export const MAX_AUDIO_BASE64 = 256060; // 44-byte header + 8s of mono PCM16
+import { RECORD_SECONDS, SAMPLE_RATE, MAX_AUDIO_BASE64 } from './audio-limits.js';
+export { RECORD_SECONDS, SAMPLE_RATE, MAX_AUDIO_BASE64, MAX_LISTENS } from './audio-limits.js';
 
-export function reverseWav(channels, sampleRate) {
-  if (!channels.length || !channels[0].length || !Number.isFinite(sampleRate) || sampleRate <= 0)
-    throw Error('No audio was captured. Skip this round and try again next round.');
-  const length = Math.min(Math.floor(channels[0].length * SAMPLE_RATE / sampleRate), RECORD_SECONDS * SAMPLE_RATE);
+// Band-limited resampling, with cached fractional-phase kernels. A short clip
+// needs only a few million multiply-adds, without a model or another download.
+export function resampleMono(channels, sourceRate) {
+  if (!channels.length || !channels[0].length || !Number.isFinite(sourceRate) || sourceRate <= 0)
+    throw Error('No audio was captured. Record another take.');
+  const sourceLength = Math.min(channels[0].length, Math.floor(RECORD_SECONDS * sourceRate));
+  const mono = new Float32Array(sourceLength);
+  for (const channel of channels) for (let i = 0; i < sourceLength; i++) mono[i] += (channel[i] || 0) / channels.length;
+  const length = Math.floor(sourceLength * SAMPLE_RATE / sourceRate);
   if (!length) throw Error('The recording was too short.');
-  const bytes = new Uint8Array(44 + length * 2), view = new DataView(bytes.buffer);
+  if (sourceRate === SAMPLE_RATE) return mono;
+  const output = new Float32Array(length);
+  const radius = 24, phases = 128, cutoff = Math.min(1, SAMPLE_RATE / sourceRate) * .94;
+  const kernels = new Map();
+  for (let i = 0; i < length; i++) {
+    const at = i * sourceRate / SAMPLE_RATE, center = Math.floor(at);
+    const phase = Math.round((at - center) * phases);
+    let weights = kernels.get(phase);
+    if (!weights) {
+      weights = new Float64Array(radius * 2);
+      let total = 0;
+      for (let j = 0; j < weights.length; j++) {
+        const distance = j - radius + 1 - phase / phases;
+        const x = Math.PI * distance * cutoff;
+        const weight = (Math.abs(x) < 1e-9 ? cutoff : Math.sin(x) / (Math.PI * distance)) *
+          (.5 + .5 * Math.cos(Math.PI * distance / radius));
+        weights[j] = weight; total += weight;
+      }
+      for (let j = 0; j < weights.length; j++) weights[j] /= total;
+      kernels.set(phase, weights);
+    }
+    let sample = 0;
+    for (let j = 0; j < weights.length; j++) sample += mono[Math.max(0, Math.min(sourceLength - 1, center + j - radius + 1))] * weights[j];
+    output[i] = sample;
+  }
+  return output;
+}
+export function reverseWav(channels, sampleRate, { polish = false } = {}) {
+  const samples = resampleMono(channels, sampleRate);
+  let peak = 0;
+  if (polish) for (const value of samples) peak = Math.max(peak, Math.abs(value));
+  // Modest gain only: never turn near-silence into loud room noise.
+  const gain = polish && peak > .015 ? Math.min(2, .92 / peak) : 1;
+  const fade = polish ? Math.min(Math.round(SAMPLE_RATE * .002), Math.floor(samples.length / 2)) : 0;
+  const bytes = new Uint8Array(44 + samples.length * 2), view = new DataView(bytes.buffer);
   const text = (at, value) => [...value].forEach((c, i) => view.setUint8(at + i, c.charCodeAt(0)));
   text(0, 'RIFF'); view.setUint32(4, bytes.length - 8, true); text(8, 'WAVE'); text(12, 'fmt ');
   view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
   view.setUint32(24, SAMPLE_RATE, true); view.setUint32(28, SAMPLE_RATE * 2, true);
-  view.setUint16(32, 2, true); view.setUint16(34, 16, true); text(36, 'data'); view.setUint32(40, length * 2, true);
-  // Average each source interval while downsampling, then reverse sample order.
-  for (let i = 0; i < length; i++) {
-    const from = Math.floor(i * sampleRate / SAMPLE_RATE);
-    const to = Math.min(channels[0].length, Math.max(from + 1, Math.floor((i + 1) * sampleRate / SAMPLE_RATE)));
-    let value = 0;
-    for (const channel of channels) for (let j = from; j < to; j++) value += channel[j];
-    value = Math.max(-1, Math.min(1, value / ((to - from) * channels.length)));
-    view.setInt16(44 + (length - 1 - i) * 2, Math.round(value * (value < 0 ? 32768 : 32767)), true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true); text(36, 'data'); view.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const edge = fade ? Math.min(1, i / fade, (samples.length - 1 - i) / fade) : 1;
+    const value = Math.max(-1, Math.min(1, samples[i] * gain * edge));
+    view.setInt16(44 + (samples.length - 1 - i) * 2, Math.round(value * (value < 0 ? 32768 : 32767)), true);
   }
   return bytes;
+}
+export function reversedBuffer(context, source) {
+  const reversed = context.createBuffer(source.numberOfChannels, source.length, source.sampleRate);
+  for (let channel = 0; channel < source.numberOfChannels; channel++)
+    reversed.getChannelData(channel).set(source.getChannelData(channel).slice().reverse());
+  return reversed;
 }
 export function toBase64(bytes) {
   let binary = '';
@@ -82,32 +121,68 @@ export function playBuffer(context, buffer, ended) {
   return () => { source.onended = null; try { source.stop(); } catch {} source.disconnect(); };
 }
 
-// Permission is requested before consuming the take. Call start only after the
-// room transaction claims it. The caller owns cleanup even if that claim fails.
+// A muted stream is reused only while this game remains open and visible.
+// No MediaRecorder runs between takes. Game owns release on leave/background.
+let sharedStream, pendingStream, streamEpoch = 0, activeCapture;
+const micListeners = new Set();
+const notifyMic = () => micListeners.forEach((listener) => listener());
+export const subscribeMicrophone = (listener) => { micListeners.add(listener); return () => micListeners.delete(listener); };
+export const microphoneReady = () => Boolean(sharedStream?.getTracks().some((track) => track.readyState === 'live'));
+export function releaseMicrophone() {
+  streamEpoch++;
+  const capture = activeCapture; activeCapture = null;
+  capture?.cancel();
+  sharedStream?.getTracks().forEach((track) => track.stop()); sharedStream = null;
+  pendingStream = null;
+  notifyMic();
+}
+async function acquireMicrophone() {
+  if (microphoneReady()) return sharedStream;
+  if (!pendingStream) {
+    const epoch = streamEpoch;
+    const request = navigator.mediaDevices.getUserMedia({ audio: {
+      channelCount: { ideal: 1 }, sampleRate: { ideal: 48000 },
+      echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+    } }).then((stream) => {
+      if (epoch !== streamEpoch) { stream.getTracks().forEach((t) => t.stop()); throw Error('Microphone request cancelled. Tap Record to try again.'); }
+      stream.getTracks().forEach((track) => { track.enabled = false; track.addEventListener?.('ended', notifyMic); });
+      sharedStream = stream; notifyMic(); return stream;
+    }).finally(() => { if (pendingStream === request) pendingStream = null; });
+    pendingStream = request;
+  }
+  return pendingStream;
+}
 export async function microphone() {
   if (!navigator.mediaDevices?.getUserMedia || !globalThis.MediaRecorder)
     throw Error('Recording is unavailable here. Open this HTTPS site in an updated Safari or Chrome.');
-  // Let the browser choose its recording route while the mic is active, then
-  // restore playback after stopping so subsequent words don't use the earpiece.
+  if (activeCapture) throw Error('Finish the current recording first.');
   const restoreSession = audioSession('auto');
   let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
+  try {
+    stream = await acquireMicrophone();
+    if (activeCapture) throw Error('Finish the current recording first.');
+    if (!microphoneReady()) throw Error('Microphone was released. Record another take.');
+  }
   catch (error) { restoreSession(); throw error; }
   let recorder;
   try {
     const mimeType = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find((type) => MediaRecorder.isTypeSupported(type));
-    recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-  } catch (error) { stream.getTracks().forEach((track) => track.stop()); restoreSession(); throw error; }
-  let timer, cancelled = false;
-  let released = false;
-  const tracksOff = () => {
-    if (released) return;
-    released = true;
-    stream.getTracks().forEach((track) => track.stop()); restoreSession();
+    recorder = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: 128000 });
+  } catch (error) { restoreSession(); throw error; }
+  let timer, cancelled = false, settled = false;
+  const mute = () => {
+    if (settled) return;
+    settled = true;
+    stream.getTracks().forEach((track) => { track.enabled = false; });
+    if (activeCapture === capture) activeCapture = null;
+    restoreSession();
   };
   const stop = () => { if (recorder.state === 'recording') recorder.stop(); };
-  const cancel = () => { cancelled = true; clearTimeout(timer); stop(); tracksOff(); };
+  const cancel = () => { cancelled = true; clearTimeout(timer); stop(); mute(); };
   const start = () => new Promise((resolve, reject) => {
+    if (cancelled || settled || stream.getTracks().some((track) => track.readyState !== 'live')) {
+      mute(); reject(Error('Microphone was released. Record another take.')); return;
+    }
     const chunks = [];
     let size = 0;
     recorder.ondataavailable = (event) => {
@@ -115,14 +190,19 @@ export async function microphone() {
       if (size > 2 * 1024 * 1024) { cancelled = true; stop(); return; }
       if (event.data.size) chunks.push(event.data);
     };
-    recorder.onerror = () => { clearTimeout(timer); tracksOff(); reject(Error('Recording was interrupted. Skip this round.')); };
+    recorder.onerror = () => { cancelled = true; clearTimeout(timer); mute(); reject(Error('Recording was interrupted. Record another take.')); try { stop(); } catch {} };
     recorder.onstop = () => {
-      clearTimeout(timer); tracksOff();
-      if (cancelled) reject(Error('Recording was interrupted. Skip this round.'));
+      clearTimeout(timer); mute();
+      if (cancelled) reject(Error('Recording was interrupted. Record another take.'));
       else resolve(new Blob(chunks, { type: recorder.mimeType }));
     };
-    recorder.start(250);
-    timer = setTimeout(stop, RECORD_SECONDS * 1000);
+    try {
+      stream.getTracks().forEach((track) => { track.enabled = true; });
+      recorder.start(250);
+      timer = setTimeout(stop, RECORD_SECONDS * 1000);
+    } catch (error) { mute(); reject(error); }
   });
-  return { start, stop, cancel };
+  const capture = { start, stop, cancel };
+  activeCapture = capture;
+  return capture;
 }

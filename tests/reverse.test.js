@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { reverseWav, toBase64, fromBase64, audioSession, resumeAudio, playBuffer, SAMPLE_RATE, MAX_AUDIO_BASE64 } from '../src/reverse-audio.js';
+import { reverseWav, toBase64, fromBase64, audioSession, resumeAudio, playBuffer, reversedBuffer, resampleMono, releaseMicrophone, microphoneReady, SAMPLE_RATE, MAX_AUDIO_BASE64 } from '../src/reverse-audio.js';
 import { newGame, nextRound, resolve, judgeReverse } from '../src/engine.js';
 import { DEFAULT_SETTINGS } from '../src/content.js';
 import { REVERSE_WORDS } from '../src/reverse-words.js';
@@ -119,43 +119,76 @@ test('every syllable level has a large unique bank of playable bundled WAVs', ()
   }
 });
 
-test('microphone capture stops all tracks and resolves a short blob without retaining the mic', async (t) => {
+test('microphone access is reused with tracks muted between takes, and released explicitly', async (t) => {
   const { microphone } = await import('../src/reverse-audio.js');
   const beforeRecorder = Object.getOwnPropertyDescriptor(globalThis, 'MediaRecorder');
   const beforeNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   t.after(() => {
+    releaseMicrophone();
     if (beforeRecorder) Object.defineProperty(globalThis, 'MediaRecorder', beforeRecorder); else delete globalThis.MediaRecorder;
     if (beforeNavigator) Object.defineProperty(globalThis, 'navigator', beforeNavigator); else delete globalThis.navigator;
   });
-  let tracksStopped = 0;
-  const stream = { getTracks: () => [{ stop: () => tracksStopped++ }] };
+  let tracksStopped = 0, requests = 0;
+  const track = { enabled: true, readyState: 'live', stop() { tracksStopped++; this.readyState = 'ended'; } };
+  const stream = { getTracks: () => [track] };
   const session = { type: 'playback' };
-  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { audioSession: session, mediaDevices: { getUserMedia: async () => stream } } });
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { audioSession: session, mediaDevices: { getUserMedia: async (constraints) => {
+    requests++; assert.equal(constraints.audio.noiseSuppression,false); assert.equal(constraints.audio.sampleRate.ideal,48000); return stream;
+  } } } });
   class Recorder {
     static isTypeSupported(type) { return type === 'audio/mp4'; }
     state = 'inactive';
-    constructor(s, options) { assert.equal(s, stream); this.mimeType = options.mimeType; }
-    start(timeslice) { assert.equal(timeslice, 250); this.state = 'recording'; }
-    stop() {
-      this.state = 'inactive';
-      this.ondataavailable({ data: new Blob(['sample'], { type: this.mimeType }) });
-      this.onstop();
-    }
+    constructor(s, options) { assert.equal(s, stream); this.mimeType = options.mimeType; assert.equal(options.audioBitsPerSecond,128000); }
+    start(timeslice) { assert.equal(timeslice,250); assert.equal(track.enabled,true); this.state='recording'; }
+    stop() { this.state='inactive'; this.ondataavailable({data:new Blob(['sample'],{type:this.mimeType})});this.onstop(); }
   }
-  Object.defineProperty(globalThis, 'MediaRecorder', { configurable: true, value: Recorder });
-  const mic = await microphone();
-  assert.equal(session.type, 'auto');
-  const captured = mic.start();
-  mic.stop();
-  assert.equal((await captured).type, 'audio/mp4');
-  assert.equal(tracksStopped, 1);
-  assert.equal(session.type, 'playback');
-  const interrupted = await microphone();
-  const failed = interrupted.start();
-  interrupted.cancel();
-  await assert.rejects(failed, /interrupted/);
-  assert.ok(tracksStopped >= 2);
-  navigator.mediaDevices.getUserMedia = async () => { throw Object.assign(Error('Denied'), { name: 'NotAllowedError' }); };
-  await assert.rejects(microphone(), { name: 'NotAllowedError' });
-  assert.equal(session.type, 'playback', 'denied microphone access restores the playback route');
+  Object.defineProperty(globalThis,'MediaRecorder',{configurable:true,value:Recorder});
+  const mic=await microphone();assert.equal(track.enabled,false);assert.equal(microphoneReady(),true);
+  const captured=mic.start();mic.stop();assert.equal((await captured).type,'audio/mp4');
+  assert.equal(track.enabled,false);assert.equal(tracksStopped,0);assert.equal(session.type,'playback');
+  const retry=await microphone();const second=retry.start();retry.stop();await second;
+  assert.equal(requests,1,'retakes reuse the permitted stream');
+  const interrupted=await microphone();const failed=interrupted.start();interrupted.cancel();await assert.rejects(failed,/interrupted/);
+  assert.equal(track.enabled,false);
+  releaseMicrophone();assert.equal(tracksStopped,1);assert.equal(microphoneReady(),false);
+  navigator.mediaDevices.getUserMedia=async()=>{throw Object.assign(Error('Denied'),{name:'NotAllowedError'});};
+  await assert.rejects(microphone(),{name:'NotAllowedError'});assert.equal(session.type,'playback');
+});
+
+test('late microphone permission cannot leave capture alive after leaving the game', async (t) => {
+  const oldNavigator=Object.getOwnPropertyDescriptor(globalThis,'navigator'),oldRecorder=globalThis.MediaRecorder;
+  let grant,stops=0;
+  Object.defineProperty(globalThis,'navigator',{configurable:true,value:{mediaDevices:{getUserMedia:()=>new Promise((resolve)=>{grant=resolve;})}}});
+  globalThis.MediaRecorder=class {};
+  t.after(()=>{releaseMicrophone();if(oldNavigator)Object.defineProperty(globalThis,'navigator',oldNavigator);else delete globalThis.navigator;if(oldRecorder)globalThis.MediaRecorder=oldRecorder;else delete globalThis.MediaRecorder;});
+  const {microphone}=await import('../src/reverse-audio.js');
+  const waiting=microphone();releaseMicrophone();
+  grant({getTracks:()=>[{stop(){stops++;}}]});
+  await assert.rejects(waiting,/cancelled/);assert.equal(stops,1);assert.equal(microphoneReady(),false);
+});
+
+test('24kHz resampling preserves speech detail and suppresses out-of-band aliasing', () => {
+  const tone=(frequency)=>Float32Array.from({length:48000/2},(_,i)=>.5*Math.sin(2*Math.PI*frequency*i/48000));
+  const rms=(samples)=>Math.sqrt(samples.slice(100,-100).reduce((sum,x)=>sum+x*x,0)/(samples.length-200));
+  const voice=resampleMono([tone(8000)],48000),ultrasonic=resampleMono([tone(15000)],48000);
+  assert.ok(rms(voice)>.3,'8kHz detail is retained instead of discarded at the old 6kHz bandwidth');
+  assert.ok(rms(ultrasonic)<.01,'high frequencies are filtered before downsampling');
+  const polished=reverseWav([tone(8000)],48000,{polish:true});
+  const view=new DataView(polished.buffer);
+  assert.equal(view.getUint32(24,true),24000);
+  assert.equal(view.getInt16(44,true),0);assert.equal(view.getInt16(polished.length-2,true),0,'short edge fades prevent clicks');
+});
+
+
+test('original-take replay reverses a copy without changing the shared listener buffer', () => {
+  const samples = new Float32Array([.2, -.4, .8]);
+  const source = { numberOfChannels: 1, length: samples.length, sampleRate: SAMPLE_RATE, getChannelData: () => samples };
+  const copy = new Float32Array(samples.length);
+  const context = { createBuffer(channels, length, rate) {
+    assert.equal(channels, 1); assert.equal(length, samples.length); assert.equal(rate, SAMPLE_RATE);
+    return { getChannelData: () => copy };
+  } };
+  reversedBuffer(context, source);
+  assert.deepEqual(copy, new Float32Array([.8, -.4, .2]));
+  assert.deepEqual(samples, new Float32Array([.2, -.4, .8]));
 });

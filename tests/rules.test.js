@@ -20,7 +20,7 @@ import { DEFAULT_SETTINGS } from "../src/content.js";
 import { requestGameChange, respondToGameChange, completeGameChange } from "../src/game-change.js";
 import { lobbyStartUpdate } from "../src/lobby.js";
 import { joinRoom } from "../src/rooms.js";
-import { reverseWav, toBase64 } from '../src/reverse-audio.js';
+import { reverseWav, toBase64, MAX_AUDIO_BASE64 } from '../src/reverse-audio.js';
 import { reverseWordAssignment } from '../src/reverse-game.js';
 import { postGameUpdate } from '../src/post-game.js';
 let env;
@@ -435,7 +435,7 @@ test('reverse audio is private, bounded, and uploadable once by the recording pl
   await assertFails(set(ref(g(), 'roundAudio/1'), { ...clip, owner: 'guest' }));
   await assertFails(set(ref(h(), 'roundAudio/1'), { ...clip, roomCode: '1WRONGGG' }));
   await assertFails(set(ref(h(), 'roundAudio/1'), { ...clip, round: 2 }));
-  await assertFails(set(ref(h(), 'roundAudio/1'), { ...clip, data: 'UklGR' + 'a'.repeat(256060) }));
+  await assertFails(set(ref(h(), 'roundAudio/1'), { ...clip, data: 'UklGR' + 'a'.repeat(MAX_AUDIO_BASE64) }));
   await assertFails(set(ref(h(), 'roundAudio/1'), { ...clip, data: 'https://attacker.example/audio.wav' }));
   await assertSucceeds(set(ref(h(), 'roundAudio/1'), clip));
   await assertFails(set(ref(h(), 'roundAudio/1'), clip));
@@ -446,7 +446,7 @@ test('reverse audio is private, bounded, and uploadable once by the recording pl
   await assertFails(get(ref(g(), 'roundAudio')));
   await assertFails(get(ref(g(), 'secrets/1/host')));
 });
-test('reverse permits three listens and one guess; only giver can pass and roles alternate', async () => {
+test('reverse permits five listens and one guess; only giver can pass and roles alternate', async () => {
   let { state, secret, clip } = await reverseFixture();
   state = { ...state, phase: 'recording', recorded: true };
   await assertSucceeds(set(ref(h(), 'rooms/1/state'), state));
@@ -455,11 +455,11 @@ test('reverse permits three listens and one guess; only giver can pass and roles
   state = { ...state, phase: 'guess' };
   await assertSucceeds(set(ref(h(), 'rooms/1/state'), state));
   await assertFails(set(ref(h(), 'rooms/1/state'), { ...state, plays: 1 }));
-  for (let i = 1; i <= 3; i++) {
+  for (let i = 1; i <= 5; i++) {
     state = { ...state, plays: i };
     await assertSucceeds(set(ref(g(), 'rooms/1/state'), state));
   }
-  await assertFails(set(ref(g(), 'rooms/1/state'), { ...state, plays: 4 }));
+  await assertFails(set(ref(g(), 'rooms/1/state'), { ...state, plays: 6 }));
   await assertFails(set(ref(g(), 'rooms/1/state'), { ...state, plays: 0 }));
   await assertFails(set(ref(h(), 'rooms/1/state'), { ...state, phase: 'pending', pending: { actor: 'guest', kind: 'guess', value: 'banana' } }));
   state = { ...state, phase: 'pending', pending: { actor: 'guest', kind: 'guess', value: 'bananna' } };
@@ -682,7 +682,7 @@ test('five-player clue guesses enforce per-hint bounds and reveal only when all 
   s=settleParty(s,secret,records);await assertSucceeds(set(ref(h(),'rooms/1/state'),s));
   assert.equal(s.phase,'reveal');assert.equal(s.scores.guest,3);assert.equal(s.scores.fifth,2);
 });
-test('group audio permits three listens per person, one private guess, and separate verdicts', async () => {
+test('group audio permits five listens per person, one private guess, and separate verdicts', async () => {
   const {settleParty,judgePartyReverse,nextListen}=await import('../src/party.js');
   let s=await groupStart('reverse',5,1);
   const secret={gameId:s.id,round:1,word:'banana'};
@@ -694,11 +694,11 @@ test('group audio permits three listens per person, one private guess, and separ
   const records={};
   for(const uid of s.players.slice(1)) {
     records[uid]=null;
-    for(let play=0;play<3;play++){
+    for(let play=0;play<5;play++){
       records[uid]=nextListen(records[uid]);
       await assertSucceeds(set(ref(anonymous(uid),partyRecordPath(s,uid)),records[uid]));
     }
-    await assertFails(set(ref(anonymous(uid),`${partyRecordPath(s,uid)}/plays`),4));
+    await assertFails(set(ref(anonymous(uid),`${partyRecordPath(s,uid)}/plays`),6));
     await assertFails(set(ref(anonymous(uid),`${partyRecordPath(s,uid)}/plays`),0));
     records[uid]={...records[uid],...partyRecord(uid==='guest'?' BANANA ':'bananna')};
     await assertSucceeds(set(ref(anonymous(uid),partyRecordPath(s,uid)),records[uid]));

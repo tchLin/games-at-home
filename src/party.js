@@ -1,3 +1,4 @@
+import { MAX_LISTENS } from './audio-limits.js';
 import { normalize, wheelPoints } from './engine.js';
 export const guessers = (s) => s.players.filter((p) => p !== s.giver);
 export const submissionPath = (base, s, uid) => `submissions/${base.split('/')[1]}/${s.id}/${s.round}/${uid}`;
@@ -13,7 +14,7 @@ export function nextSubmission(current, s, uid, value) {
 }
 export function nextListen(current) {
   const plays = current?.plays || 0;
-  if (plays >= 3) return;
+  if (plays >= MAX_LISTENS) return;
   return { ...current, plays: plays + 1 };
 }
 function finish(s, secret, records) {

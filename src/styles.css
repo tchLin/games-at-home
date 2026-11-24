@@ -1943,3 +1943,5 @@ footer span {
 .avatar-4 { background: #dbe3e1; color: #5e7974; }
 .final-scores { flex-wrap: wrap; gap: clamp(1rem, 4vw, 4rem); }
 .final-scores > div { min-width: 5rem; }
+.microphone-access { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: .75rem; margin-top: 1.25rem; }
+.microphone-access small { color: var(--muted); }

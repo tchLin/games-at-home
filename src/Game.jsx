@@ -21,6 +21,7 @@ import { wordSuggestions } from "./word-links.js";
 import { playGameSound } from "./sound.js";
 import { Button, Field, Tag, Notice } from "./App.jsx";
 import ReverseGame from './ReverseGame.jsx';
+import { releaseMicrophone } from './reverse-audio.js';
 import { submissionPath, nextSubmission, partyHint } from './party.js';
 import { PartyStatus } from './PartyStatus.jsx';
 export default function Game(props) {
@@ -39,6 +40,17 @@ export default function Game(props) {
   } = props;
   const s = room.state;
   const ended = gameEnded(s);
+  useEffect(() => {
+    if (s.game !== 'reverse') return;
+    const hide = () => { if (document.visibilityState === 'hidden') releaseMicrophone(); };
+    document.addEventListener('visibilitychange', hide);
+    window.addEventListener('pagehide', releaseMicrophone);
+    return () => {
+      document.removeEventListener('visibilitychange', hide);
+      window.removeEventListener('pagehide', releaseMicrophone);
+      releaseMicrophone();
+    };
+  }, [s.game]);
   const finish = (choice) => act(() => update(ref(db), postGameUpdate(base, s, choice, crypto.randomUUID())));
   const previousState = useRef(null);
   useEffect(() => {

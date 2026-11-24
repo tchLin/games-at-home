@@ -66,7 +66,7 @@ test('per-player submissions and listens survive reconnects without overwrites',
   assert.equal(nextSubmission(submitted,s,'b','apple'),undefined);
   assert.equal(nextSubmission(null,s,'a','banana'),undefined);
   let record=submitted;
-  for(let i=1;i<=3;i++){record=nextListen(record);assert.equal(record.plays,i);}
+  for(let i=1;i<=5;i++){record=nextListen(record);assert.equal(record.plays,i);}
   assert.equal(nextListen(record),undefined);assert.equal(record.entries[0].value,'banana');
 });
 test('five-player word race assigns unique chains and passes turns in a circle', () => {

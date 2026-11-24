@@ -26,7 +26,7 @@ export const GAMES = {
   reverse: {
     name: "Backwards & Forwards",
     tag: "A little backwards. A lot of laughs.",
-    description: "Copy a backwards word in one take. Flip your voice and let your person guess.",
+    description: "Copy a backwards word, perfect your take, then flip your voice for everyone to guess.",
     time: "5–10 min",
     color: "rose",
   },

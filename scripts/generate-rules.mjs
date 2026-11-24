@@ -1,3 +1,4 @@
+import { MAX_LISTENS, MAX_AUDIO_BASE64 } from '../src/audio-limits.js';
 import { writeFileSync } from "node:fs";
 import { multiplayerRules } from "./multiplayer-rules.mjs";
 const signed =
@@ -73,7 +74,7 @@ const state = {
   hintIndex: num(0, 3),
   used: num(0, 5),
   recorded: bool,
-  plays: { '.validate': 'newData.val() === 0 || newData.val() === 1 || newData.val() === 2 || newData.val() === 3' },
+  plays: { '.validate': Array.from({length: MAX_LISTENS + 1}, (_, i) => `newData.val() === ${i}`).join(' || ') },
   players: {
     ".validate": `newData.numChildren() === 2 && newData.child('0').val() === ${meta}.child('host').val() && newData.child('1').val() === ${meta}.child('guest').val()`,
   },
@@ -168,7 +169,7 @@ const samePending = equalChildren('pending', ['actor', 'kind', 'value', 'index']
 const sameRound = "newData.child('id').val() === data.child('id').val() && newData.child('round').val() === data.child('round').val()";
 const isGiver = "auth.uid === data.child('giver').val()";
 const phase = (value, source = 'data') => `${source}.child('phase').val() === '${value}'`;
-// Preserve the one take, three listens and one guess across refreshes/tabs.
+// Preserve the one submitted recording, five listens and one guess across refreshes/tabs.
 // Room members can still access their clip bytes: this is a game rule, not DRM.
 state['.validate'] += ` && (newData.child('game').val() !== 'reverse' || (
   newData.hasChildren(['recorded','plays','giver']) && (
@@ -309,7 +310,7 @@ const rules = {
       '.write': `${allowed} && ((${host} && !newData.exists() && (newData.parent().parent().child('rooms').child($slot).child('meta').child('open').val() !== true || data.child('roomCode').val() !== ${meta}.child('code').val() || data.child('gameId').val() !== newData.parent().parent().child('rooms').child($slot).child('state').child('id').val() || data.child('round').val() !== newData.parent().parent().child('rooms').child($slot).child('state').child('round').val())) || (${active} && ${member} && ${matchState}.child('game').val() === 'reverse' && ${matchState}.child('phase').val() === 'recording' && ${matchState}.child('recorded').val() === true && ${matchState}.child('giver').val() === auth.uid && newData.exists() && (!data.exists() || data.child('roomCode').val() !== ${meta}.child('code').val() || data.child('gameId').val() !== ${matchState}.child('id').val() || data.child('round').val() !== ${matchState}.child('round').val())))`,
       '.validate': `newData.hasChildren(['roomCode','gameId','round','owner','data']) && newData.child('roomCode').val() === ${meta}.child('code').val() && newData.child('gameId').val() === ${matchState}.child('id').val() && newData.child('round').val() === ${matchState}.child('round').val() && newData.child('owner').val() === auth.uid`,
       roomCode: str(8), gameId: str(50), round: num(1,20), owner: str(128),
-      data: { '.validate': "newData.isString() && newData.val().length >= 64 && newData.val().length <= 256060 && newData.val().beginsWith('UklGR') && newData.val().matches(/^[A-Za-z0-9+\\/=]+$/)" },
+      data: { '.validate': `newData.isString() && newData.val().length >= 64 && newData.val().length <= ${MAX_AUDIO_BASE64} && newData.val().beginsWith('UklGR') && newData.val().matches(/^[A-Za-z0-9+\\/=]+$/)` },
       $other: { '.validate': false },
     },
   },
